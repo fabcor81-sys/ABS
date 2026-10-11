@@ -9,9 +9,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -24,17 +23,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.lotus.abs.bluetooth.BluetoothManager
 import com.lotus.abs.data.database.LotusAbsDatabase
-import com.lotus.abs.ui.screens.DashboardScreen
 import com.lotus.abs.ui.screens.DiagnosticsScreen
 import com.lotus.abs.ui.screens.HomeScreen
 import com.lotus.abs.ui.theme.LotusABSAndroidTheme
-import com.lotus.abs.ui.viewmodel.DashboardViewModel
 import com.lotus.abs.ui.viewmodel.DiagnosticsViewModel
 import com.lotus.abs.ui.viewmodel.HomeViewModel
 
@@ -42,7 +38,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var bluetoothManager: BluetoothManager
     private lateinit var database: LotusAbsDatabase
     private lateinit var homeViewModel: HomeViewModel
-    private lateinit var dashboardViewModel: DashboardViewModel
     private lateinit var diagnosticsViewModel: DiagnosticsViewModel
 
     private val requestPermissionLauncher = registerForActivityResult(
@@ -62,7 +57,6 @@ class MainActivity : ComponentActivity() {
         database = LotusAbsDatabase.getInstance(this)
 
         homeViewModel = HomeViewModel(bluetoothManager)
-        dashboardViewModel = DashboardViewModel(bluetoothManager, database)
         diagnosticsViewModel = DiagnosticsViewModel(bluetoothManager, database)
 
         // Request permissions
@@ -72,7 +66,6 @@ class MainActivity : ComponentActivity() {
             LotusABSAndroidTheme {
                 MainApp(
                     homeViewModel = homeViewModel,
-                    dashboardViewModel = dashboardViewModel,
                     diagnosticsViewModel = diagnosticsViewModel
                 )
             }
@@ -107,7 +100,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainApp(
     homeViewModel: HomeViewModel,
-    dashboardViewModel: DashboardViewModel,
     diagnosticsViewModel: DiagnosticsViewModel
 ) {
     val navController = rememberNavController()
@@ -137,32 +129,14 @@ fun MainApp(
                 NavigationBarItem(
                     icon = {
                         Icon(
-                            imageVector = Icons.Default.BarChart,
-                            contentDescription = "Dashboard"
+                            imageVector = Icons.Default.Code,
+                            contentDescription = "Terminal"
                         )
                     },
-                    label = { Text("Dashboard") },
+                    label = { Text("Terminal") },
                     selected = selectedTab == 1,
                     onClick = {
                         selectedTab = 1
-                        navController.navigate("dashboard") {
-                            popUpTo(navController.graph.startDestinationId) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
-                )
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = "Diagnostics"
-                        )
-                    },
-                    label = { Text("Diagnostics") },
-                    selected = selectedTab == 2,
-                    onClick = {
-                        selectedTab = 2
                         navController.navigate("diagnostics") {
                             popUpTo(navController.graph.startDestinationId) { saveState = true }
                             launchSingleTop = true
@@ -180,9 +154,6 @@ fun MainApp(
         ) {
             composable("home") {
                 HomeScreen(homeViewModel)
-            }
-            composable("dashboard") {
-                DashboardScreen(dashboardViewModel)
             }
             composable("diagnostics") {
                 DiagnosticsScreen(diagnosticsViewModel)

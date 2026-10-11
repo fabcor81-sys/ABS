@@ -1,11 +1,14 @@
 package com.lotus.abs.ui.screens
 
+import android.bluetooth.BluetoothDevice
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -32,14 +35,42 @@ fun HomeScreen(viewModel: HomeViewModel) {
             .background(MaterialTheme.colorScheme.background)
             .padding(16.dp)
     ) {
-        // Header
-        Text(
-            stringResource(R.string.app_name),
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 24.dp)
-        )
+        // App Title / Navigation Header
+        if (state.connectionStatus != BluetoothManager.ConnectionState.DISCONNECTED) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+            ) {
+                IconButton(
+                    onClick = { viewModel.disconnect() }
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to Scanned Devices",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Text(
+                    "Back to Scanned Devices",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clickable { viewModel.disconnect() }
+                        .padding(start = 4.dp)
+                )
+            }
+        } else {
+            Text(
+                stringResource(R.string.app_name),
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 24.dp)
+            )
+        }
 
         // Connection Status Card
         ConnectionStatusCard(state)
@@ -48,14 +79,31 @@ fun HomeScreen(viewModel: HomeViewModel) {
 
         // Device List
         if (state.connectionStatus == BluetoothManager.ConnectionState.DISCONNECTED) {
-            Text(
-                "Available Devices",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+            ) {
+                Text(
+                    "Available Devices",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
 
-            if (state.pairedDevices.isEmpty()) {
+                if (state.isScanning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+
+            val pairedAddresses = state.pairedDevices.map { it.address }.toSet()
+            val unpairScannedDevices = state.scannedDevices.filter { it.address !in pairedAddresses }
+
+            if (state.pairedDevices.isEmpty() && unpairScannedDevices.isEmpty()) {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -65,36 +113,71 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     )
                 ) {
                     Text(
-                        "No paired devices found",
+                        if (state.isScanning) "Scanning for nearby BLE & Bluetooth devices..." else "No devices found. Tap 'Scan for Devices' below.",
                         modifier = Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             } else {
-                LazyColumn {
-                    items(state.pairedDevices) { device ->
-                        DeviceCard(
-                            device = device,
-                            onClick = { viewModel.connect(device) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp)
-                        )
+                LazyColumn(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (unpairScannedDevices.isNotEmpty()) {
+                        item {
+                            Text(
+                                "Discovered BLE Devices",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+                        items(unpairScannedDevices) { device ->
+                            DeviceCard(
+                                device = device,
+                                badgeText = "BLE",
+                                onClick = { viewModel.connect(device) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    if (state.pairedDevices.isNotEmpty()) {
+                        item {
+                            Text(
+                                "Paired Devices",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+                        items(state.pairedDevices) { device ->
+                            DeviceCard(
+                                device = device,
+                                badgeText = "Paired",
+                                onClick = { viewModel.connect(device) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            )
+                        }
                     }
                 }
             }
         } else {
-            // Show connection info when connected
+            // Show connection info when connected or connecting
             EcuInfoCard(state)
+            Spacer(modifier = Modifier.weight(1f))
         }
-
-        Spacer(modifier = Modifier.weight(1f))
 
         // Action Buttons
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 16.dp),
+                .padding(vertical = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (state.connectionStatus == BluetoothManager.ConnectionState.CONNECTED) {
@@ -109,14 +192,37 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 ) {
                     Text(stringResource(R.string.disconnect))
                 }
-            } else {
+            } else if (state.connectionStatus == BluetoothManager.ConnectionState.ERROR) {
                 Button(
-                    onClick = { viewModel.refreshDeviceList() },
+                    onClick = { viewModel.disconnect() },
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
                 ) {
-                    Text("Refresh")
+                    Text("Back to Scanned Devices")
+                }
+            } else {
+                if (state.isScanning) {
+                    Button(
+                        onClick = { viewModel.stopScan() },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Text("Stop Scan")
+                    }
+                } else {
+                    Button(
+                        onClick = { viewModel.refreshDeviceList() },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                    ) {
+                        Text("Scan for Devices")
+                    }
                 }
             }
         }
@@ -128,7 +234,7 @@ fun ConnectionStatusCard(state: HomeState) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(8.dp),
+            .padding(vertical = 4.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
@@ -185,28 +291,51 @@ fun ConnectionStatusCard(state: HomeState) {
 }
 
 @Composable
-fun DeviceCard(device: android.bluetooth.BluetoothDevice, onClick: () -> Unit, modifier: Modifier) {
+fun DeviceCard(
+    device: BluetoothDevice,
+    badgeText: String,
+    onClick: () -> Unit,
+    modifier: Modifier
+) {
     Card(
         modifier = modifier
-            .clickable { onClick() }
-            .background(MaterialTheme.colorScheme.surface),
+            .clickable { onClick() },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         )
     ) {
-        Column(
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(16.dp)
         ) {
-            Text(
-                device.name ?: "Unknown",
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 16.sp
-            )
-            Text(
-                device.address,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    device.name ?: "Unnamed Device",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp
+                )
+                Text(
+                    device.address,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.padding(start = 8.dp)
+            ) {
+                Text(
+                    text = badgeText,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
         }
     }
 }
@@ -216,7 +345,7 @@ fun EcuInfoCard(state: HomeState) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(8.dp),
+            .padding(vertical = 4.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         )

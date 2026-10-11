@@ -6,12 +6,13 @@ import androidx.lifecycle.viewModelScope
 import com.lotus.abs.bluetooth.BluetoothManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 data class HomeState(
     val connectionStatus: BluetoothManager.ConnectionState = BluetoothManager.ConnectionState.DISCONNECTED,
     val pairedDevices: List<BluetoothDevice> = emptyList(),
+    val scannedDevices: List<BluetoothDevice> = emptyList(),
+    val isScanning: Boolean = false,
     val batteryVoltage: Float = 0f,
     val selectedDevice: BluetoothDevice? = null,
     val ecuInfo: String = "Not Connected",
@@ -27,7 +28,9 @@ class HomeViewModel(
 
     init {
         observeConnectionState()
+        observeScanning()
         loadPairedDevices()
+        startScan()
     }
 
     private fun observeConnectionState() {
@@ -59,13 +62,35 @@ class HomeViewModel(
         }
     }
 
+    private fun observeScanning() {
+        viewModelScope.launch {
+            bluetoothManager.scannedDevices.collect { devices ->
+                _state.emit(_state.value.copy(scannedDevices = devices))
+            }
+        }
+        viewModelScope.launch {
+            bluetoothManager.isScanning.collect { isScanning ->
+                _state.emit(_state.value.copy(isScanning = isScanning))
+            }
+        }
+    }
+
     private fun loadPairedDevices() {
         val devices = bluetoothManager.getPairedDevices()
         _state.tryEmit(_state.value.copy(pairedDevices = devices))
     }
 
+    fun startScan() {
+        bluetoothManager.startScan()
+    }
+
+    fun stopScan() {
+        bluetoothManager.stopScan()
+    }
+
     fun connect(device: BluetoothDevice) {
         viewModelScope.launch {
+            bluetoothManager.stopScan()
             _state.emit(_state.value.copy(selectedDevice = device, isInitializing = true))
             bluetoothManager.connectToDevice(device)
         }
@@ -106,5 +131,6 @@ class HomeViewModel(
 
     fun refreshDeviceList() {
         loadPairedDevices()
+        startScan()
     }
 }
