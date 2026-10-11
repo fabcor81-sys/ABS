@@ -221,14 +221,24 @@ class BluetoothManager(private val context: Context) {
             val cccdUUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
             val descriptor = characteristic.getDescriptor(cccdUUID)
             if (descriptor != null) {
+                // Determine correct CCCD value based on characteristic properties
+                val cccdValue = when {
+                    (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0 ->
+                        BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0 ->
+                        BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                    else -> BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE // Fallback
+                }
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    gatt.writeDescriptor(descriptor, cccdValue)
                 } else {
                     @Suppress("DEPRECATION")
-                    descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    descriptor.value = cccdValue
                     @Suppress("DEPRECATION")
                     gatt.writeDescriptor(descriptor)
                 }
+                Log.d("BluetoothManager", "CCCD configured: ${if (cccdValue == BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) "NOTIFY" else "INDICATE"}")
             }
         } catch (e: Exception) {
             Log.e("BluetoothManager", "Error enabling BLE notifications: ${e.message}")
