@@ -4,6 +4,7 @@ import android.bluetooth.BluetoothDevice
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lotus.abs.bluetooth.BluetoothManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -113,11 +114,13 @@ class HomeViewModel(
         viewModelScope.launch {
             try {
                 bluetoothManager.sendCommand("AT Z")      // Reset
+                delay(300)
                 bluetoothManager.sendCommand("AT E0")     // Echo off
+                delay(100)
                 bluetoothManager.sendCommand("AT L0")     // Line feeds off
+                delay(100)
                 bluetoothManager.sendCommand("AT SP 6")   // Set protocol KWP2000
-
-                // Request battery voltage
+                delay(100)
                 bluetoothManager.sendCommand("ATRV")
             } catch (e: Exception) {
                 _state.emit(_state.value.copy(ecuInfo = "Initialization Error: ${e.message}"))

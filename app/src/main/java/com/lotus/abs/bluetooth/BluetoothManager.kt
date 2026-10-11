@@ -258,13 +258,6 @@ class BluetoothManager(private val context: Context) {
                     if (success) {
                         deviceType = DeviceType.BLE
                         Log.d("BluetoothManager", "BLE Characteristics configured: write=${writeCharacteristic?.uuid}, notify=${notifyCharacteristic?.uuid}")
-                        bleConnecting = false
-                        listeningActive = true
-                        try {
-                            _connectionState.tryEmit(ConnectionState.CONNECTED)
-                        } catch (e: Exception) {
-                            Log.e("BluetoothManager", "Error emitting connected: ${e.message}")
-                        }
                     } else {
                         Log.e("BluetoothManager", "No suitable BLE characteristic found")
                         bleConnecting = false
@@ -274,6 +267,17 @@ class BluetoothManager(private val context: Context) {
                             Log.e("BluetoothManager", "Error emitting error: ${e.message}")
                         }
                     }
+                }
+            }
+
+            override fun onDescriptorWrite(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor?, status: Int) {
+                Log.d("BluetoothManager", "onDescriptorWrite status=$status for ${descriptor?.characteristic?.uuid}")
+                bleConnecting = false
+                listeningActive = true
+                try {
+                    _connectionState.tryEmit(ConnectionState.CONNECTED)
+                } catch (e: Exception) {
+                    Log.e("BluetoothManager", "Error emitting connected: ${e.message}")
                 }
             }
 
@@ -316,31 +320,13 @@ class BluetoothManager(private val context: Context) {
     private fun setupBLECharacteristics(gatt: BluetoothGatt): Boolean {
         writeCharacteristic = null
         notifyCharacteristic = null
-
-        // Known service & (write, notify) characteristic triplets
-        val knownTriplets = listOf(
-            Triple("0000ffe0-0000-1000-8000-00805f9b34fb", "0000ffe1-0000-1000-8000-00805f9b34fb", "0000ffe1-0000-1000-8000-00805f9b34fb"),
-            Triple("0000fff0-0000-1000-8000-00805f9b34fb", "0000fff1-0000-1000-8000-00805f9b34fb", "0000fff2-0000-1000-8000-00805f9b34fb"),
-            Triple("000018f0-0000-1000-8000-00805f9b34fb", "00002af0-0000-1000-8000-00805f9b34fb", "00002af1-0000-1000-8000-00805f9b34fb")
-        )
-
-        for ((serviceUUID, writeUUID, notifyUUID) in knownTriplets) {
-            val service = gatt.getService(UUID.fromString(serviceUUID))
-            if (service != null) {
-                val writeChar = service.getCharacteristic(UUID.fromString(writeUUID))
-                val notifyChar = service.getCharacteristic(UUID.fromString(notifyUUID))
-                if (writeChar != null && notifyChar != null) {
-                    writeCharacteristic = writeChar
-                    notifyCharacteristic = notifyChar
-                    enableBLEDataNotifications(gatt, notifyChar)
-                    Log.d("BluetoothManager", "Matched known BLE triplet: service $serviceUUID, write ${writeChar.uuid}, notify ${notifyChar.uuid}")
-                    return true
-                }
-            }
-        }
+        val cccdUUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
         // Generic Fallback: Search across all services
         for (service in gatt.services) {
+            // Ignore generic access / attribute profiles
+            if (service.uuid.toString().startsWith("0000180")) continue
+
             var foundWrite: BluetoothGattCharacteristic? = null
             var foundNotify: BluetoothGattCharacteristic? = null
 
@@ -348,11 +334,13 @@ class BluetoothManager(private val context: Context) {
                 val props = chara.properties
                 val isWritable = (props and (BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)) != 0
                 val isNotifiable = (props and (BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_INDICATE)) != 0
+                val hasCCCD = chara.getDescriptor(cccdUUID) != null
 
                 if (isWritable && foundWrite == null) {
                     foundWrite = chara
                 }
-                if (isNotifiable && foundNotify == null) {
+                // Only consider it a notify characteristic if it actually has the CCCD descriptor
+                if (isNotifiable && hasCCCD && foundNotify == null) {
                     foundNotify = chara
                 }
             }
@@ -361,7 +349,18 @@ class BluetoothManager(private val context: Context) {
                 writeCharacteristic = foundWrite
                 notifyCharacteristic = foundNotify
                 enableBLEDataNotifications(gatt, foundNotify)
-                Log.d("BluetoothManager", "Fallback matched BLE characteristics in service ${service.uuid}: write ${foundWrite.uuid}, notify ${foundNotify.uuid}")
+                Log.d("BluetoothManager", "Matched BLE characteristics in service ${service.uuid}: write ${foundWrite.uuid}, notify ${foundNotify.uuid}")
+                return true
+            }
+        }
+
+        // If we found a write char but no separate notify char with a CCCD, maybe it's the same characteristic
+        if (writeCharacteristic != null && notifyCharacteristic == null) {
+            val hasCCCD = writeCharacteristic!!.getDescriptor(cccdUUID) != null
+            if (hasCCCD) {
+                notifyCharacteristic = writeCharacteristic
+                enableBLEDataNotifications(gatt, writeCharacteristic!!)
+                Log.d("BluetoothManager", "Matched single BLE characteristic for write/notify: ${writeCharacteristic?.uuid}")
                 return true
             }
         }
@@ -393,9 +392,18 @@ class BluetoothManager(private val context: Context) {
                     gatt.writeDescriptor(descriptor)
                 }
                 Log.d("BluetoothManager", "Wrote CCCD descriptor for ${characteristic.uuid}")
+            } else {
+                bleConnecting = false
+                listeningActive = true
+                try {
+                    _connectionState.tryEmit(ConnectionState.CONNECTED)
+                } catch (e: Exception) {
+                    Log.e("BluetoothManager", "Error emitting connected: ${e.message}")
+                }
             }
         } catch (e: Exception) {
             Log.e("BluetoothManager", "Error enabling BLE notifications: ${e.message}")
+            bleConnecting = false
         }
     }
 
@@ -428,7 +436,7 @@ class BluetoothManager(private val context: Context) {
     }
 
     private suspend fun sendCommandClassic(command: String) {
-        val formattedCommand = command.trim() + "\r"
+        val formattedCommand = if (command.endsWith("\r")) command else command + "\r"
         outputStream?.write(formattedCommand.toByteArray(Charsets.US_ASCII))
         outputStream?.flush()
         Log.d("BluetoothManager", "Sent (Classic): $command")
@@ -436,8 +444,9 @@ class BluetoothManager(private val context: Context) {
 
     private suspend fun sendCommandBLE(command: String) {
         writeCharacteristic?.let { characteristic ->
-            val formattedCommand = command.trim() + "\r"
+            val formattedCommand = if (command.endsWith("\r")) command else command + "\r"
             val bytes = formattedCommand.toByteArray(Charsets.US_ASCII)
+
             val supportsWriteWithoutResponse = (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
             val writeType = if (supportsWriteWithoutResponse) {
                 BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
@@ -447,12 +456,21 @@ class BluetoothManager(private val context: Context) {
             characteristic.writeType = writeType
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                val result = bluetoothGatt?.writeCharacteristic(
+                var result = bluetoothGatt?.writeCharacteristic(
                     characteristic,
                     bytes,
                     writeType
                 )
-                Log.d("BluetoothManager", "writeCharacteristic result code=$result")
+                Log.d("BluetoothManager", "writeCharacteristic (type $writeType) result code=$result")
+                if (result != 0) {
+                    characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    result = bluetoothGatt?.writeCharacteristic(
+                        characteristic,
+                        bytes,
+                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    )
+                    Log.d("BluetoothManager", "Retry writeCharacteristic (DEFAULT) result code=$result")
+                }
             } else {
                 @Suppress("DEPRECATION")
                 characteristic.value = bytes
