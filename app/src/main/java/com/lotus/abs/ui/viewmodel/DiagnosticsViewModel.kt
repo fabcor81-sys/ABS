@@ -3,20 +3,33 @@ package com.lotus.abs.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lotus.abs.bluetooth.BluetoothManager
-import com.lotus.abs.data.entity.DTCRecord
 import com.lotus.abs.data.database.LotusAbsDatabase
-import com.lotus.abs.obd2.OBD2Commands
+import com.lotus.abs.data.entity.DTCRecord
 import com.lotus.abs.obd2.OBD2Parser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+enum class TerminalEntryType {
+    SENT, RECEIVED, SYSTEM, ERROR
+}
+
+data class TerminalEntry(
+    val id: Long = System.currentTimeMillis() + (0..9999).random(),
+    val text: String,
+    val type: TerminalEntryType,
+    val timestamp: String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date())
+)
 
 data class DiagnosticsState(
+    val terminalLog: List<TerminalEntry> = emptyList(),
+    val customCommand: String = "",
     val dtcList: List<DTCRecord> = emptyList(),
-    val isLoading: Boolean = false,
-    val error: String? = null,
-    val lastUpdate: Long = 0
+    val isSending: Boolean = false,
+    val connectionState: BluetoothManager.ConnectionState = BluetoothManager.ConnectionState.DISCONNECTED
 )
 
 class DiagnosticsViewModel(
@@ -30,8 +43,41 @@ class DiagnosticsViewModel(
     private val dtcDao = database.dtcDao()
 
     init {
+        observeBluetoothConnection()
+        observeBluetoothData()
         loadDTCsFromDatabase()
-        observeBluetoothDTC()
+        addSystemLog("Terminal initialized. Ready for Lotus ABS ECU commands.")
+    }
+
+    private fun observeBluetoothConnection() {
+        viewModelScope.launch {
+            bluetoothManager.connectionState.collect { connectionState ->
+                _state.emit(_state.value.copy(connectionState = connectionState))
+                when (connectionState) {
+                    BluetoothManager.ConnectionState.CONNECTED -> {
+                        addSystemLog("Device connected.")
+                    }
+                    BluetoothManager.ConnectionState.DISCONNECTED -> {
+                        addSystemLog("Device disconnected.")
+                    }
+                    BluetoothManager.ConnectionState.ERROR -> {
+                        addErrorLog("Bluetooth connection error.")
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
+    private fun observeBluetoothData() {
+        viewModelScope.launch {
+            bluetoothManager.receivedData.collect { data ->
+                if (data.isNotBlank()) {
+                    addReceivedLog(data)
+                    parseDTCResponse(data)
+                }
+            }
+        }
     }
 
     private fun loadDTCsFromDatabase() {
@@ -42,14 +88,61 @@ class DiagnosticsViewModel(
         }
     }
 
-    private fun observeBluetoothDTC() {
+    fun updateCustomCommand(command: String) {
+        _state.value = _state.value.copy(customCommand = command)
+    }
+
+    fun sendCustomCommand() {
+        val command = _state.value.customCommand.trim()
+        if (command.isNotEmpty()) {
+            sendCommand(command)
+            updateCustomCommand("")
+        }
+    }
+
+    fun sendCommand(command: String) {
         viewModelScope.launch {
-            bluetoothManager.receivedData.collect { data ->
-                if (data.contains("19 02") || data.contains("19") || data.contains("CLEARED")) {
-                    parseDTCResponse(data)
-                }
+            addSentLog(command)
+            _state.emit(_state.value.copy(isSending = true))
+            try {
+                bluetoothManager.sendCommand(command)
+            } catch (e: Exception) {
+                addErrorLog("Failed to send command '$command': ${e.message}")
+            } finally {
+                _state.emit(_state.value.copy(isSending = false))
             }
         }
+    }
+
+    fun clearTerminal() {
+        _state.value = _state.value.copy(terminalLog = emptyList())
+        addSystemLog("Terminal log cleared.")
+    }
+
+    private fun addSentLog(text: String) {
+        val entry = TerminalEntry(text = "> $text", type = TerminalEntryType.SENT)
+        appendLog(entry)
+    }
+
+    private fun addReceivedLog(text: String) {
+        val entry = TerminalEntry(text = text, type = TerminalEntryType.RECEIVED)
+        appendLog(entry)
+    }
+
+    private fun addSystemLog(text: String) {
+        val entry = TerminalEntry(text = "[SYS] $text", type = TerminalEntryType.SYSTEM)
+        appendLog(entry)
+    }
+
+    private fun addErrorLog(text: String) {
+        val entry = TerminalEntry(text = "[ERR] $text", type = TerminalEntryType.ERROR)
+        appendLog(entry)
+    }
+
+    private fun appendLog(entry: TerminalEntry) {
+        val updatedList = _state.value.terminalLog + entry
+        val trimmedList = if (updatedList.size > 200) updatedList.takeLast(200) else updatedList
+        _state.value = _state.value.copy(terminalLog = trimmedList)
     }
 
     private fun parseDTCResponse(response: String) {
@@ -58,7 +151,8 @@ class DiagnosticsViewModel(
                 val dtcCodes = OBD2Parser.parseDTC(response)
                 if (response.contains("CLEARED")) {
                     dtcDao.clearAll()
-                } else {
+                    addSystemLog("DTC database cleared.")
+                } else if (dtcCodes.isNotEmpty()) {
                     dtcCodes.forEach { code ->
                         val dtcRecord = DTCRecord(
                             code = code,
@@ -67,30 +161,11 @@ class DiagnosticsViewModel(
                         )
                         dtcDao.insert(dtcRecord)
                     }
+                    addSystemLog("Parsed ${dtcCodes.size} DTC code(s).")
                 }
-                _state.emit(
-                    _state.value.copy(
-                        isLoading = false,
-                        lastUpdate = System.currentTimeMillis()
-                    )
-                )
             } catch (e: Exception) {
-                _state.emit(_state.value.copy(error = e.message, isLoading = false))
+                // Ignore parse errors for non-DTC raw responses
             }
-        }
-    }
-
-    fun readDTC() {
-        viewModelScope.launch {
-            _state.emit(_state.value.copy(isLoading = true))
-            bluetoothManager.sendCommand(OBD2Commands.READ_DTC)
-        }
-    }
-
-    fun clearDTC() {
-        viewModelScope.launch {
-            _state.emit(_state.value.copy(isLoading = true))
-            bluetoothManager.sendCommand(OBD2Commands.CLEAR_DTC)
         }
     }
 
@@ -102,14 +177,17 @@ class DiagnosticsViewModel(
 
     private fun decodeDTC(code: String): String {
         return when (code) {
+            "C0035" -> "Front Left Wheel Speed Sensor Circuit"
+            "C0040" -> "Front Right Wheel Speed Sensor Circuit"
+            "C0045" -> "Rear Left Wheel Speed Sensor Circuit"
+            "C0050" -> "Rear Right Wheel Speed Sensor Circuit"
+            "C0110" -> "ABS Pump Motor Circuit Malfunction"
+            "C0121" -> "ABS Valve Relay Circuit Malfunction"
+            "C0161" -> "ABS Brake Switch Circuit"
+            "C0245" -> "Wheel Speed Sensor Frequency Error"
+            "C0550" -> "ECU Malfunction / Internal Error"
             "P0100" -> "Mass Air Flow Circuit"
-            "P0101" -> "Mass Air Flow Range/Performance"
-            "P0102" -> "Mass Air Flow Low Input"
-            "P0103" -> "Mass Air Flow High Input"
-            "C0XXX" -> "ABS System Fault"
-            "B0XXX" -> "Body/Chassis Fault"
-            "U0XXX" -> "Network/Communication Fault"
-            else -> "Unknown DTC: $code"
+            else -> "Lotus ABS Fault Code: $code"
         }
     }
 }
