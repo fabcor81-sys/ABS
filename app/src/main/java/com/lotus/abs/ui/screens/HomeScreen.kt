@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -33,14 +35,42 @@ fun HomeScreen(viewModel: HomeViewModel) {
             .background(MaterialTheme.colorScheme.background)
             .padding(16.dp)
     ) {
-        // Header
-        Text(
-            stringResource(R.string.app_name),
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 24.dp)
-        )
+        // App Title / Navigation Header
+        if (state.connectionStatus != BluetoothManager.ConnectionState.DISCONNECTED) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+            ) {
+                IconButton(
+                    onClick = { viewModel.disconnect() }
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to Scanned Devices",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Text(
+                    "Back to Scanned Devices",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clickable { viewModel.disconnect() }
+                        .padding(start = 4.dp)
+                )
+            }
+        } else {
+            Text(
+                stringResource(R.string.app_name),
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 24.dp)
+            )
+        }
 
         // Connection Status Card
         ConnectionStatusCard(state)
@@ -138,7 +168,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 }
             }
         } else {
-            // Show connection info when connected
+            // Show connection info when connected or connecting
             EcuInfoCard(state)
             Spacer(modifier = Modifier.weight(1f))
         }
@@ -161,6 +191,15 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     )
                 ) {
                     Text(stringResource(R.string.disconnect))
+                }
+            } else if (state.connectionStatus == BluetoothManager.ConnectionState.ERROR) {
+                Button(
+                    onClick = { viewModel.disconnect() },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                ) {
+                    Text("Back to Scanned Devices")
                 }
             } else {
                 if (state.isScanning) {

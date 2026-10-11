@@ -45,7 +45,7 @@ class BluetoothManager(private val context: Context) {
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
-    // Stream received data (SharedFlow to avoid StateFlow conflation of duplicate responses)
+    // Stream received data
     private val _receivedData = MutableSharedFlow<String>(
         replay = 0,
         extraBufferCapacity = 100,
@@ -163,21 +163,24 @@ class BluetoothManager(private val context: Context) {
             try {
                 _connectionState.emit(ConnectionState.CONNECTING)
 
-                deviceType = detectDeviceType(device)
-                Log.d("BluetoothManager", "Device type detected: $deviceType (${device.name})")
+                val detectedType = detectDeviceType(device)
+                Log.d("BluetoothManager", "Device type detected: $detectedType (${device.name})")
 
-                when (deviceType) {
-                    DeviceType.CLASSIC -> connectClassic(device)
-                    DeviceType.BLE -> connectBLE(device)
-                    DeviceType.UNKNOWN -> {
-                        Log.w("BluetoothManager", "Unknown device type, trying Classic first")
+                when (detectedType) {
+                    DeviceType.CLASSIC -> {
                         try {
                             connectClassic(device)
-                            deviceType = DeviceType.CLASSIC
                         } catch (e: Exception) {
                             Log.d("BluetoothManager", "Classic failed, trying BLE")
-                            deviceType = DeviceType.BLE
                             connectBLE(device)
+                        }
+                    }
+                    DeviceType.BLE, DeviceType.UNKNOWN -> {
+                        try {
+                            connectBLE(device)
+                        } catch (e: Exception) {
+                            Log.d("BluetoothManager", "BLE failed, trying Classic")
+                            connectClassic(device)
                         }
                     }
                 }
@@ -198,6 +201,7 @@ class BluetoothManager(private val context: Context) {
         inputStream = bluetoothSocket?.inputStream
         outputStream = bluetoothSocket?.outputStream
 
+        deviceType = DeviceType.CLASSIC
         _connectionState.emit(ConnectionState.CONNECTED)
         Log.d("BluetoothManager", "Connected to ${device.name} (Classic)")
 
@@ -238,6 +242,7 @@ class BluetoothManager(private val context: Context) {
                         writeCharacteristic = chara
                         enableBLEDataNotifications(gatt, chara)
 
+                        deviceType = DeviceType.BLE
                         Log.d("BluetoothManager", "BLE Characteristic found and configured: ${chara.uuid}")
                         bleConnecting = false
                         listeningActive = true
@@ -295,7 +300,6 @@ class BluetoothManager(private val context: Context) {
     }
 
     private fun findBLECharacteristic(gatt: BluetoothGatt): BluetoothGattCharacteristic? {
-        // Known ELM327 BLE service & characteristic UUID pairs
         val knownUUIDPairs = listOf(
             Pair("0000ffe0-0000-1000-8000-00805f9b34fb", "0000ffe1-0000-1000-8000-00805f9b34fb"),
             Pair("0000fff0-0000-1000-8000-00805f9b34fb", "0000fff1-0000-1000-8000-00805f9b34fb"),
@@ -308,7 +312,6 @@ class BluetoothManager(private val context: Context) {
             if (chara != null) return chara
         }
 
-        // Fallback: iterate all services to find a characteristic supporting write & notify
         for (service in gatt.services) {
             for (chara in service.characteristics) {
                 val props = chara.properties
@@ -363,8 +366,12 @@ class BluetoothManager(private val context: Context) {
                     DeviceType.CLASSIC -> sendCommandClassic(command)
                     DeviceType.BLE -> sendCommandBLE(command)
                     else -> {
-                        Log.e("BluetoothManager", "Unknown device type for sending")
-                        _connectionState.emit(ConnectionState.ERROR)
+                        Log.w("BluetoothManager", "Unknown device type for sending, attempting BLE then Classic")
+                        try {
+                            sendCommandBLE(command)
+                        } catch (e: Exception) {
+                            sendCommandClassic(command)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -446,9 +453,14 @@ class BluetoothManager(private val context: Context) {
                         bluetoothGatt?.close()
                         bluetoothGatt = null
                     }
-                    else -> {}
+                    else -> {
+                        bluetoothGatt?.close()
+                        bluetoothGatt = null
+                        bluetoothSocket?.close()
+                    }
                 }
 
+                deviceType = DeviceType.UNKNOWN
                 _connectionState.emit(ConnectionState.DISCONNECTED)
                 Log.d("BluetoothManager", "Disconnected")
             } catch (e: Exception) {
@@ -459,14 +471,10 @@ class BluetoothManager(private val context: Context) {
 
     private fun detectDeviceType(device: BluetoothDevice): DeviceType {
         return try {
-            when {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
-                    when (device.type) {
-                        BluetoothDevice.DEVICE_TYPE_LE -> DeviceType.BLE
-                        BluetoothDevice.DEVICE_TYPE_CLASSIC -> DeviceType.CLASSIC
-                        else -> DeviceType.UNKNOWN
-                    }
-                }
+            when (device.type) {
+                BluetoothDevice.DEVICE_TYPE_LE -> DeviceType.BLE
+                BluetoothDevice.DEVICE_TYPE_CLASSIC -> DeviceType.CLASSIC
+                BluetoothDevice.DEVICE_TYPE_DUAL -> DeviceType.BLE
                 else -> DeviceType.UNKNOWN
             }
         } catch (e: SecurityException) {
