@@ -71,14 +71,33 @@ class DiagnosticsViewModel(
 
     private fun observeBluetoothData() {
         viewModelScope.launch {
+            // Buffer to hold partial lines
+            var responseBuffer = ""
+
             bluetoothManager.receivedData.collect { data ->
                 val cleaned = data.replace("\r", "")
-                val lines = cleaned.split("\n")
-                for (line in lines) {
-                    if (line.isNotEmpty()) {
-                        addReceivedLog(line)
+                responseBuffer += cleaned
+
+                // Check if buffer contains a newline or prompt char
+                if (responseBuffer.contains("\n") || responseBuffer.endsWith(">")) {
+                    // We split by newline, handle any prompt >
+                    val lines = responseBuffer.split("\n")
+                    for (i in lines.indices) {
+                        val line = lines[i].trim()
+                        if (line.isNotEmpty()) {
+                            // If this is the last line and it's just ">", append it to previous log or output on its own
+                            if (i == lines.lastIndex && line == ">" && lines.size > 1) {
+                                // Add to previous line if possible, or just emit ">"
+                                addReceivedLog(line)
+                            } else {
+                                addReceivedLog(line)
+                            }
+                        }
                     }
+                    // clear buffer after processing
+                    responseBuffer = ""
                 }
+                
                 parseDTCResponse(data)
             }
         }
