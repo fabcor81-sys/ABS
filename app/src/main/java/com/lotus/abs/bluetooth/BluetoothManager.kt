@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.os.Build
@@ -110,6 +111,7 @@ class BluetoothManager(private val context: Context) {
                     android.bluetooth.BluetoothProfile.STATE_DISCONNECTED -> {
                         Log.d("BluetoothManager", "BLE Disconnected")
                         bluetoothGatt = null
+                        bleConnecting = false
                         try {
                             _connectionState.tryEmit(ConnectionState.DISCONNECTED)
                         } catch (e: Exception) {
@@ -120,36 +122,54 @@ class BluetoothManager(private val context: Context) {
             }
 
             override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
-                if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS && gatt != null) {
                     Log.d("BluetoothManager", "Services discovered")
 
-                    val service = gatt?.getService(UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb"))
-                    writeCharacteristic = service?.getCharacteristic(UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb"))
+                    val chara = findBLECharacteristic(gatt)
+                    if (chara != null) {
+                        writeCharacteristic = chara
+                        enableBLEDataNotifications(gatt, chara)
 
-                    if (writeCharacteristic != null) {
-                        Log.d("BluetoothManager", "Write characteristic found")
+                        Log.d("BluetoothManager", "BLE Characteristic found and configured: ${chara.uuid}")
+                        bleConnecting = false
+                        listeningActive = true
                         try {
                             _connectionState.tryEmit(ConnectionState.CONNECTED)
                         } catch (e: Exception) {
                             Log.e("BluetoothManager", "Error emitting connected: ${e.message}")
                         }
-                        listeningActive = true
+                    } else {
+                        Log.e("BluetoothManager", "No suitable BLE characteristic found")
+                        bleConnecting = false
+                        try {
+                            _connectionState.tryEmit(ConnectionState.ERROR)
+                        } catch (e: Exception) {
+                            Log.e("BluetoothManager", "Error emitting error: ${e.message}")
+                        }
                     }
                 }
             }
 
+            // Android 13+ (API 33+)
             override fun onCharacteristicChanged(
                 gatt: BluetoothGatt,
                 characteristic: BluetoothGattCharacteristic,
                 value: ByteArray
             ) {
-                val receivedString = String(value)
-                try {
-                    _receivedData.tryEmit(receivedString)
-                } catch (e: Exception) {
-                    Log.e("BluetoothManager", "Error emitting data: ${e.message}")
+                handleReceivedBytes(value)
+            }
+
+            // Pre-Android 13 (API < 33)
+            @Deprecated("Deprecated in Java", ReplaceWith("onCharacteristicChanged(gatt, characteristic, value)"))
+            override fun onCharacteristicChanged(
+                gatt: BluetoothGatt?,
+                characteristic: BluetoothGattCharacteristic?
+            ) {
+                @Suppress("DEPRECATION")
+                val value = characteristic?.value
+                if (value != null) {
+                    handleReceivedBytes(value)
                 }
-                Log.d("BluetoothManager", "BLE Received: $receivedString")
             }
         }
 
@@ -164,6 +184,65 @@ class BluetoothManager(private val context: Context) {
             Thread.sleep(100)
             timeout++
         }
+    }
+
+    private fun findBLECharacteristic(gatt: BluetoothGatt): BluetoothGattCharacteristic? {
+        // Known ELM327 BLE service & characteristic UUID pairs
+        val knownUUIDPairs = listOf(
+            Pair("0000ffe0-0000-1000-8000-00805f9b34fb", "0000ffe1-0000-1000-8000-00805f9b34fb"),
+            Pair("0000fff0-0000-1000-8000-00805f9b34fb", "0000fff1-0000-1000-8000-00805f9b34fb"),
+            Pair("000018f0-0000-1000-8000-00805f9b34fb", "00002af0-0000-1000-8000-00805f9b34fb")
+        )
+
+        for ((serviceUUID, charUUID) in knownUUIDPairs) {
+            val service = gatt.getService(UUID.fromString(serviceUUID))
+            val chara = service?.getCharacteristic(UUID.fromString(charUUID))
+            if (chara != null) return chara
+        }
+
+        // Fallback: iterate all services to find a characteristic supporting write & notify
+        for (service in gatt.services) {
+            for (chara in service.characteristics) {
+                val props = chara.properties
+                val isWritable = (props and (BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)) != 0
+                val isNotifiable = (props and (BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_INDICATE)) != 0
+
+                if (isWritable && isNotifiable) {
+                    return chara
+                }
+            }
+        }
+        return null
+    }
+
+    private fun enableBLEDataNotifications(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+        try {
+            gatt.setCharacteristicNotification(characteristic, true)
+            val cccdUUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+            val descriptor = characteristic.getDescriptor(cccdUUID)
+            if (descriptor != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    @Suppress("DEPRECATION")
+                    gatt.writeDescriptor(descriptor)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("BluetoothManager", "Error enabling BLE notifications: ${e.message}")
+        }
+    }
+
+    private fun handleReceivedBytes(value: ByteArray) {
+        val receivedString = String(value)
+        try {
+            _receivedData.tryEmit(receivedString)
+        } catch (e: Exception) {
+            Log.e("BluetoothManager", "Error emitting data: ${e.message}")
+        }
+        Log.d("BluetoothManager", "BLE Received: $receivedString")
     }
 
     suspend fun sendCommand(command: String) {
@@ -192,8 +271,19 @@ class BluetoothManager(private val context: Context) {
 
     private suspend fun sendCommandBLE(command: String) {
         writeCharacteristic?.let { characteristic ->
-            characteristic.value = (command + "\r").toByteArray()
-            bluetoothGatt?.writeCharacteristic(characteristic)
+            val bytes = (command + "\r").toByteArray()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                bluetoothGatt?.writeCharacteristic(
+                    characteristic,
+                    bytes,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                characteristic.value = bytes
+                @Suppress("DEPRECATION")
+                bluetoothGatt?.writeCharacteristic(characteristic)
+            }
             Log.d("BluetoothManager", "Sent (BLE): $command")
         }
     }
