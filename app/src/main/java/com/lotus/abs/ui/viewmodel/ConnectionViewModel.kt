@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-data class HomeState(
+data class ConnectionScreenState(
     val connectionStatus: BluetoothManager.ConnectionState = BluetoothManager.ConnectionState.DISCONNECTED,
     val pairedDevices: List<BluetoothDevice> = emptyList(),
     val scannedDevices: List<BluetoothDevice> = emptyList(),
@@ -20,12 +20,12 @@ data class HomeState(
     val isInitializing: Boolean = false
 )
 
-class HomeViewModel(
+class ConnectionViewModel(
     private val bluetoothManager: BluetoothManager
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(HomeState())
-    val state: StateFlow<HomeState> = _state
+    private val _state = MutableStateFlow(ConnectionScreenState())
+    val state: StateFlow<ConnectionScreenState> = _state
 
     init {
         observeConnectionState()

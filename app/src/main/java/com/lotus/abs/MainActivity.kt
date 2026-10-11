@@ -7,37 +7,45 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.lotus.abs.bluetooth.BluetoothManager
 import com.lotus.abs.data.database.LotusAbsDatabase
+import com.lotus.abs.ui.screens.BleedScreen
+import com.lotus.abs.ui.screens.ConnectionScreen
 import com.lotus.abs.ui.screens.DiagnosticsScreen
 import com.lotus.abs.ui.screens.HomeScreen
+import com.lotus.abs.ui.screens.LiveDataScreen
 import com.lotus.abs.ui.theme.LotusABSAndroidTheme
+import com.lotus.abs.ui.viewmodel.ConnectionViewModel
 import com.lotus.abs.ui.viewmodel.DiagnosticsViewModel
-import com.lotus.abs.ui.viewmodel.HomeViewModel
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var bluetoothManager: BluetoothManager
     private lateinit var database: LotusAbsDatabase
-    private lateinit var homeViewModel: HomeViewModel
+    private lateinit var connectionViewModel: ConnectionViewModel
     private lateinit var diagnosticsViewModel: DiagnosticsViewModel
 
     private val requestPermissionLauncher = registerForActivityResult(
@@ -45,7 +53,7 @@ class MainActivity : ComponentActivity() {
     ) { permissions ->
         val allGranted = permissions.values.all { it }
         if (allGranted) {
-            homeViewModel.refreshDeviceList()
+            connectionViewModel.refreshDeviceList()
         }
     }
 
@@ -56,7 +64,7 @@ class MainActivity : ComponentActivity() {
         bluetoothManager = BluetoothManager(this)
         database = LotusAbsDatabase.getInstance(this)
 
-        homeViewModel = HomeViewModel(bluetoothManager)
+        connectionViewModel = ConnectionViewModel(bluetoothManager)
         diagnosticsViewModel = DiagnosticsViewModel(bluetoothManager, database)
 
         // Request permissions
@@ -65,7 +73,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             LotusABSAndroidTheme {
                 MainApp(
-                    homeViewModel = homeViewModel,
+                    connectionViewModel = connectionViewModel,
                     diagnosticsViewModel = diagnosticsViewModel
                 )
             }
@@ -97,66 +105,94 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainApp(
-    homeViewModel: HomeViewModel,
+    connectionViewModel: ConnectionViewModel,
     diagnosticsViewModel: DiagnosticsViewModel
 ) {
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
     val navController = rememberNavController()
-    var selectedTab by remember { mutableIntStateOf(0) }
+    
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route ?: "home"
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            imageVector = Icons.Default.Home,
-                            contentDescription = "Home"
-                        )
-                    },
-                    label = { Text("Home") },
-                    selected = selectedTab == 0,
-                    onClick = {
-                        selectedTab = 0
-                        navController.navigate("home") {
-                            popUpTo(navController.graph.startDestinationId) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
+    val menuItems = listOf(
+        Triple("home", "Home", Icons.Default.Home),
+        Triple("connection", "Device Connection", Icons.Default.Bluetooth),
+        Triple("live_data", "Live Data", Icons.Default.Speed),
+        Triple("dtc", "DTC Errors", Icons.Default.Warning),
+        Triple("bleed", "Bleed System", Icons.Default.Build)
+    )
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                Text(
+                    text = "Lotus ABS",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(24.dp)
                 )
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            imageVector = Icons.Default.Code,
-                            contentDescription = "Terminal"
-                        )
-                    },
-                    label = { Text("Terminal") },
-                    selected = selectedTab == 1,
-                    onClick = {
-                        selectedTab = 1
-                        navController.navigate("diagnostics") {
-                            popUpTo(navController.graph.startDestinationId) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
-                )
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+                menuItems.forEach { (route, label, icon) ->
+                    NavigationDrawerItem(
+                        icon = { Icon(icon, contentDescription = label) },
+                        label = { Text(label) },
+                        selected = currentRoute == route,
+                        onClick = {
+                            navController.navigate(route) {
+                                popUpTo(navController.graph.startDestinationId) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                }
             }
         }
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = "home",
-            modifier = Modifier.padding(innerPadding)
-        ) {
-            composable("home") {
-                HomeScreen(homeViewModel)
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(menuItems.find { it.first == currentRoute }?.second ?: "Lotus ABS") },
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                )
             }
-            composable("diagnostics") {
-                DiagnosticsScreen(diagnosticsViewModel)
+        ) { innerPadding ->
+            NavHost(
+                navController = navController,
+                startDestination = "home",
+                modifier = Modifier.padding(innerPadding)
+            ) {
+                composable("home") {
+                    HomeScreen(navController)
+                }
+                composable("connection") {
+                    ConnectionScreen(connectionViewModel)
+                }
+                composable("live_data") {
+                    LiveDataScreen()
+                }
+                composable("dtc") {
+                    DiagnosticsScreen(diagnosticsViewModel)
+                }
+                composable("bleed") {
+                    BleedScreen()
+                }
             }
         }
     }
