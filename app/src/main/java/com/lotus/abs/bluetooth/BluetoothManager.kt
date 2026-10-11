@@ -7,8 +7,13 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothSocket
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +44,16 @@ class BluetoothManager(private val context: Context) {
     private val _receivedData = MutableStateFlow<String>("")
     val receivedData: StateFlow<String> = _receivedData
 
+    // Scanning state
+    private val _scannedDevices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
+    val scannedDevices: StateFlow<List<BluetoothDevice>> = _scannedDevices
+
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning: StateFlow<Boolean> = _isScanning
+
+    private val scanHandler = Handler(Looper.getMainLooper())
+    private var scanCallback: ScanCallback? = null
+
     private var deviceType: DeviceType = DeviceType.UNKNOWN
     private var listeningActive = false
 
@@ -50,7 +65,91 @@ class BluetoothManager(private val context: Context) {
         CLASSIC, BLE, UNKNOWN
     }
 
+    fun startScan(scanDurationMs: Long = 10000) {
+        if (_isScanning.value) return
+
+        try {
+            val scanner = bluetoothAdapter?.bluetoothLeScanner
+            if (scanner == null) {
+                Log.e("BluetoothManager", "BluetoothLeScanner unavailable or Bluetooth is off")
+                return
+            }
+
+            _scannedDevices.value = emptyList()
+            _isScanning.value = true
+
+            val deviceMap = mutableMapOf<String, BluetoothDevice>()
+
+            scanCallback = object : ScanCallback() {
+                override fun onScanResult(callbackType: Int, result: ScanResult?) {
+                    result?.device?.let { device ->
+                        try {
+                            deviceMap[device.address] = device
+                            _scannedDevices.value = deviceMap.values.toList()
+                        } catch (e: SecurityException) {
+                            Log.e("BluetoothManager", "SecurityException reading device info: ${e.message}")
+                        }
+                    }
+                }
+
+                override fun onBatchScanResults(results: MutableList<ScanResult>?) {
+                    results?.forEach { result ->
+                        result.device?.let { device ->
+                            try {
+                                deviceMap[device.address] = device
+                            } catch (e: SecurityException) {
+                                Log.e("BluetoothManager", "SecurityException reading device info: ${e.message}")
+                            }
+                        }
+                    }
+                    _scannedDevices.value = deviceMap.values.toList()
+                }
+
+                override fun onScanFailed(errorCode: Int) {
+                    Log.e("BluetoothManager", "BLE Scan failed with code: $errorCode")
+                    _isScanning.value = false
+                }
+            }
+
+            val settings = ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .build()
+
+            scanner.startScan(null, settings, scanCallback)
+            Log.d("BluetoothManager", "BLE scan started")
+
+            scanHandler.postDelayed({
+                stopScan()
+            }, scanDurationMs)
+
+        } catch (e: SecurityException) {
+            Log.e("BluetoothManager", "SecurityException during startScan: ${e.message}")
+            _isScanning.value = false
+        } catch (e: Exception) {
+            Log.e("BluetoothManager", "Exception during startScan: ${e.message}")
+            _isScanning.value = false
+        }
+    }
+
+    fun stopScan() {
+        if (!_isScanning.value) return
+        try {
+            scanCallback?.let {
+                bluetoothAdapter?.bluetoothLeScanner?.stopScan(it)
+            }
+            scanCallback = null
+            Log.d("BluetoothManager", "BLE scan stopped")
+        } catch (e: SecurityException) {
+            Log.e("BluetoothManager", "SecurityException during stopScan: ${e.message}")
+        } catch (e: Exception) {
+            Log.e("BluetoothManager", "Exception during stopScan: ${e.message}")
+        } finally {
+            _isScanning.value = false
+        }
+    }
+
     suspend fun connectToDevice(device: BluetoothDevice) {
+        stopScan()
         withContext(Dispatchers.IO) {
             try {
                 _connectionState.emit(ConnectionState.CONNECTING)
@@ -310,6 +409,7 @@ class BluetoothManager(private val context: Context) {
     }
 
     suspend fun disconnect() {
+        stopScan()
         withContext(Dispatchers.IO) {
             try {
                 listeningActive = false
