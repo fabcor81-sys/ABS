@@ -49,8 +49,8 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.values.all { it }
-        if (!allGranted) {
-            // Handle permission denial
+        if (allGranted) {
+            homeViewModel.refreshDeviceList()
         }
     }
 

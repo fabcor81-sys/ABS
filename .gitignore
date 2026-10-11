@@ -1,5 +1,7 @@
 # Gradle
 .gradle
+gradle/caches/
+daemon/
 build/
 *.apk
 *.ap_

@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lotus.abs.R
 import com.lotus.abs.bluetooth.BluetoothManager
+import com.lotus.abs.ui.viewmodel.HomeState
 import com.lotus.abs.ui.viewmodel.HomeViewModel
 
 @Composable
@@ -123,7 +124,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
 }
 
 @Composable
-fun ConnectionStatusCard(state: HomeViewModel.HomeState) {
+fun ConnectionStatusCard(state: HomeState) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -211,7 +212,7 @@ fun DeviceCard(device: android.bluetooth.BluetoothDevice, onClick: () -> Unit, m
 }
 
 @Composable
-fun EcuInfoCard(state: HomeViewModel.HomeState) {
+fun EcuInfoCard(state: HomeState) {
     Card(
         modifier = Modifier
             .fillMaxWidth()

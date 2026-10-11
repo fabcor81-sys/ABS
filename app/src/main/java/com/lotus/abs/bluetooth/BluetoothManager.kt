@@ -139,19 +139,17 @@ class BluetoothManager(private val context: Context) {
             }
 
             override fun onCharacteristicChanged(
-                gatt: BluetoothGatt?,
-                characteristic: BluetoothGattCharacteristic?,
-                value: ByteArray?
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                value: ByteArray
             ) {
-                if (value != null) {
-                    val receivedString = String(value)
-                    try {
-                        _receivedData.tryEmit(receivedString)
-                    } catch (e: Exception) {
-                        Log.e("BluetoothManager", "Error emitting data: ${e.message}")
-                    }
-                    Log.d("BluetoothManager", "BLE Received: $receivedString")
+                val receivedString = String(value)
+                try {
+                    _receivedData.tryEmit(receivedString)
+                } catch (e: Exception) {
+                    Log.e("BluetoothManager", "Error emitting data: ${e.message}")
                 }
+                Log.d("BluetoothManager", "BLE Received: $receivedString")
             }
         }
 
@@ -248,23 +246,38 @@ class BluetoothManager(private val context: Context) {
     }
 
     private fun detectDeviceType(device: BluetoothDevice): DeviceType {
-        return when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
-                when (device.type) {
-                    BluetoothDevice.TYPE_LE -> DeviceType.BLE
-                    BluetoothDevice.TYPE_CLASSIC -> DeviceType.CLASSIC
-                    else -> DeviceType.UNKNOWN
+        return try {
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
+                    when (device.type) {
+                        BluetoothDevice.DEVICE_TYPE_LE -> DeviceType.BLE
+                        BluetoothDevice.DEVICE_TYPE_CLASSIC -> DeviceType.CLASSIC
+                        else -> DeviceType.UNKNOWN
+                    }
                 }
+                else -> DeviceType.UNKNOWN
             }
-            else -> DeviceType.UNKNOWN
+        } catch (e: SecurityException) {
+            Log.e("BluetoothManager", "SecurityException detecting device type: ${e.message}")
+            DeviceType.UNKNOWN
         }
     }
 
     fun getPairedDevices(): List<BluetoothDevice> {
-        return bluetoothAdapter?.bondedDevices?.toList() ?: emptyList()
+        return try {
+            bluetoothAdapter?.bondedDevices?.toList() ?: emptyList()
+        } catch (e: SecurityException) {
+            Log.e("BluetoothManager", "SecurityException getting paired devices: ${e.message}")
+            emptyList()
+        }
     }
 
     fun isBluetoothEnabled(): Boolean {
-        return bluetoothAdapter?.isEnabled ?: false
+        return try {
+            bluetoothAdapter?.isEnabled ?: false
+        } catch (e: SecurityException) {
+            Log.e("BluetoothManager", "SecurityException checking bluetooth state: ${e.message}")
+            false
+        }
     }
 }
