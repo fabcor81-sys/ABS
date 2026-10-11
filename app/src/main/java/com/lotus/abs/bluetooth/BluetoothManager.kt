@@ -163,25 +163,22 @@ class BluetoothManager(private val context: Context) {
             try {
                 _connectionState.emit(ConnectionState.CONNECTING)
 
-                val detectedType = detectDeviceType(device)
-                Log.d("BluetoothManager", "Device type detected: $detectedType (${device.name})")
-
-                when (detectedType) {
-                    DeviceType.CLASSIC -> {
-                        try {
-                            connectClassic(device)
-                        } catch (e: Exception) {
-                            Log.d("BluetoothManager", "Classic failed, trying BLE")
-                            connectBLE(device)
-                        }
+                val isPairedInSettings = getPairedDevices().any { it.address == device.address }
+                if (isPairedInSettings) {
+                    Log.d("BluetoothManager", "Device is paired, connecting via Classic SPP")
+                    try {
+                        connectClassic(device)
+                    } catch (e: Exception) {
+                        Log.w("BluetoothManager", "Classic failed for paired device, trying BLE fallback: ${e.message}")
+                        connectBLE(device)
                     }
-                    DeviceType.BLE, DeviceType.UNKNOWN -> {
-                        try {
-                            connectBLE(device)
-                        } catch (e: Exception) {
-                            Log.d("BluetoothManager", "BLE failed, trying Classic")
-                            connectClassic(device)
-                        }
+                } else {
+                    Log.d("BluetoothManager", "Device is un-paired, connecting via BLE")
+                    try {
+                        connectBLE(device)
+                    } catch (e: Exception) {
+                        Log.w("BluetoothManager", "BLE failed, trying Classic fallback: ${e.message}")
+                        connectClassic(device)
                     }
                 }
             } catch (e: Exception) {
@@ -193,17 +190,36 @@ class BluetoothManager(private val context: Context) {
     }
 
     private suspend fun connectClassic(device: BluetoothDevice) {
-        bluetoothSocket = device.createRfcommSocketToServiceRecord(
-            UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-        )
-        bluetoothSocket?.connect()
+        try {
+            bluetoothAdapter?.cancelDiscovery()
+        } catch (e: SecurityException) {
+            Log.e("BluetoothManager", "SecurityException cancelling discovery: ${e.message}")
+        }
 
-        inputStream = bluetoothSocket?.inputStream
-        outputStream = bluetoothSocket?.outputStream
+        var socket: BluetoothSocket? = null
+        try {
+            val sppUuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+            socket = device.createRfcommSocketToServiceRecord(sppUuid)
+            socket.connect()
+        } catch (e: Exception) {
+            Log.w("BluetoothManager", "Standard RFCOMM failed, trying fallback channel 1: ${e.message}")
+            try {
+                val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                socket = method.invoke(device, 1) as BluetoothSocket
+                socket.connect()
+            } catch (fallbackException: Exception) {
+                Log.e("BluetoothManager", "Fallback RFCOMM failed: ${fallbackException.message}")
+                throw fallbackException
+            }
+        }
+
+        bluetoothSocket = socket
+        inputStream = socket?.inputStream
+        outputStream = socket?.outputStream
 
         deviceType = DeviceType.CLASSIC
         _connectionState.emit(ConnectionState.CONNECTED)
-        Log.d("BluetoothManager", "Connected to ${device.name} (Classic)")
+        Log.d("BluetoothManager", "Connected to ${device.name} (Classic SPP)")
 
         listeningActive = true
         startListeningClassic()
@@ -354,7 +370,7 @@ class BluetoothManager(private val context: Context) {
     }
 
     private fun handleReceivedBytes(value: ByteArray) {
-        val receivedString = String(value)
+        val receivedString = String(value, Charsets.US_ASCII)
         _receivedData.tryEmit(receivedString)
         Log.d("BluetoothManager", "BLE Received: $receivedString")
     }
@@ -366,11 +382,11 @@ class BluetoothManager(private val context: Context) {
                     DeviceType.CLASSIC -> sendCommandClassic(command)
                     DeviceType.BLE -> sendCommandBLE(command)
                     else -> {
-                        Log.w("BluetoothManager", "Unknown device type for sending, attempting BLE then Classic")
+                        Log.w("BluetoothManager", "Unknown device type for sending, attempting Classic SPP then BLE")
                         try {
-                            sendCommandBLE(command)
-                        } catch (e: Exception) {
                             sendCommandClassic(command)
+                        } catch (e: Exception) {
+                            sendCommandBLE(command)
                         }
                     }
                 }
@@ -382,16 +398,16 @@ class BluetoothManager(private val context: Context) {
     }
 
     private suspend fun sendCommandClassic(command: String) {
-        val formattedCommand = if (command.endsWith("\r")) command else command + "\r"
-        outputStream?.write(formattedCommand.toByteArray())
+        val formattedCommand = command.trim() + "\r"
+        outputStream?.write(formattedCommand.toByteArray(Charsets.US_ASCII))
         outputStream?.flush()
         Log.d("BluetoothManager", "Sent (Classic): $command")
     }
 
     private suspend fun sendCommandBLE(command: String) {
         writeCharacteristic?.let { characteristic ->
-            val formattedCommand = if (command.endsWith("\r")) command else command + "\r"
-            val bytes = formattedCommand.toByteArray()
+            val formattedCommand = command.trim() + "\r"
+            val bytes = formattedCommand.toByteArray(Charsets.US_ASCII)
             val supportsWriteWithoutResponse = (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
             val writeType = if (supportsWriteWithoutResponse) {
                 BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
@@ -418,22 +434,26 @@ class BluetoothManager(private val context: Context) {
 
     private suspend fun startListeningClassic() {
         withContext(Dispatchers.IO) {
-            try {
-                val buffer = ByteArray(1024)
-                var bytes: Int
+            val buffer = ByteArray(1024)
+            var bytes: Int
 
-                while (listeningActive && bluetoothSocket?.isConnected == true) {
+            while (listeningActive && bluetoothSocket?.isConnected == true) {
+                try {
                     bytes = inputStream?.read(buffer) ?: -1
                     if (bytes > 0) {
-                        val receivedString = String(buffer, 0, bytes)
+                        val receivedString = String(buffer, 0, bytes, Charsets.US_ASCII)
                         _receivedData.emit(receivedString)
                         Log.d("BluetoothManager", "Received (Classic): $receivedString")
+                    } else if (bytes == -1) {
+                        Log.w("BluetoothManager", "InputStream reached EOF (-1)")
+                        break
                     }
+                } catch (e: IOException) {
+                    Log.e("BluetoothManager", "Listen error: ${e.message}")
+                    break
                 }
-            } catch (e: IOException) {
-                Log.e("BluetoothManager", "Listen error: ${e.message}")
-                listeningActive = false
             }
+            listeningActive = false
         }
     }
 
@@ -474,7 +494,7 @@ class BluetoothManager(private val context: Context) {
             when (device.type) {
                 BluetoothDevice.DEVICE_TYPE_LE -> DeviceType.BLE
                 BluetoothDevice.DEVICE_TYPE_CLASSIC -> DeviceType.CLASSIC
-                BluetoothDevice.DEVICE_TYPE_DUAL -> DeviceType.BLE
+                BluetoothDevice.DEVICE_TYPE_DUAL -> DeviceType.CLASSIC
                 else -> DeviceType.UNKNOWN
             }
         } catch (e: SecurityException) {
