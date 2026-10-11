@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lotus ABS Android</string>
+    <string name="home">Home</string>
+    <string name="dashboard">Dashboard</string>
+    <string name="diagnostics">Diagnostics</string>
+    <string name="settings">Settings</string>
+
+    <!-- Home Screen -->
+    <string name="connection_status">Connection Status</string>
+    <string name="connected">Connected</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="scanning">Scanning...</string>
+    <string name="device_info">Device Info</string>
+    <string name="battery_voltage">Battery Voltage</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+
+    <!-- Dashboard -->
+    <string name="live_data">Live Data</string>
+    <string name="rpm">RPM</string>
+    <string name="speed">Speed (km/h)</string>
+    <string name="temperature">Temp (°C)</string>
+    <string name="pressure">Pressure (bar)</string>
+
+    <!-- Diagnostics -->
+    <string name="trouble_codes">Trouble Codes</string>
+    <string name="clear_errors">Clear Errors</string>
+    <string name="no_errors">No Errors</string>
+    <string name="error_code">Error Code</string>
+    <string name="status">Status</string>
+
+    <!-- Common -->
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="error">Error</string>
+    <string name="success">Success</string>
+</resources>

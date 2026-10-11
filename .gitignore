@@ -1,0 +1,46 @@
+# Gradle
+.gradle
+build/
+*.apk
+*.ap_
+*.aab
+
+# Android Studio
+.idea/
+.DS_Store
+*.iml
+*.iws
+*.ipr
+*.apk
+local.properties
+
+# Kotlin
+*.kt.bak
+
+# Build
+bin/
+gen/
+
+# IDE
+*.class
+*.log
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Node (if using npm)
+node_modules/
+npm-debug.log

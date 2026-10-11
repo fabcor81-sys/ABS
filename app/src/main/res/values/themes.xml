@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.LotusABSAndroid" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/md_theme_light_primary</item>
+        <item name="android:colorOnPrimary">@color/md_theme_light_on_primary</item>
+        <item name="android:colorSecondary">@color/md_theme_light_secondary</item>
+        <item name="android:colorOnSecondary">@color/md_theme_light_on_secondary</item>
+        <item name="android:colorTertiary">@color/md_theme_light_tertiary</item>
+        <item name="android:colorOnTertiary">@color/md_theme_light_on_tertiary</item>
+        <item name="android:colorError">@color/md_theme_light_error</item>
+        <item name="android:colorOnError">@color/md_theme_light_on_error</item>
+        <item name="android:colorBackground">@color/md_theme_light_background</item>
+        <item name="android:colorOnBackground">@color/md_theme_light_on_background</item>
+    </style>
+</resources>
