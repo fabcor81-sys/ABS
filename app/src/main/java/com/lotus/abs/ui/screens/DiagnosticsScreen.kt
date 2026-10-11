@@ -2,6 +2,7 @@ package com.lotus.abs.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -45,15 +46,8 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
     }
 
     val macroCommands = listOf(
-        MacroCommand("Reset ELM", "AT Z"),
-        MacroCommand("Echo Off", "AT E0"),
-        MacroCommand("Protocol KWP2000", "AT SP 6"),
-        MacroCommand("Lotus ABS Header", "AT SH 81 28 F1"),
-        MacroCommand("Read Voltage", "AT RV"),
-        MacroCommand("Adapter Info", "ATI"),
-        MacroCommand("Read DTC", "19 02 AF"),
-        MacroCommand("Clear DTC", "14 FF FF 00"),
-        MacroCommand("Read Sensors", "22 02 01")
+        MacroCommand("Read DTC", "18 02"),
+        MacroCommand("Clear DTC", "14 FF FF 00")
     )
 
     Column(
@@ -70,16 +64,14 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                 .padding(bottom = 12.dp)
         ) {
             Text(
-                "Terminal & Diagnostics",
-                fontSize = 24.sp,
+                "Command & Log",
+                fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.weight(1f)
             )
 
-            IconButton(
-                onClick = { viewModel.clearTerminal() }
-            ) {
+            IconButton(onClick = { viewModel.clearTerminal() }) {
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = "Clear Terminal",
@@ -93,10 +85,8 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .border(1.dp, Color(0xFF333333), RoundedCornerShape(8.dp)),
-            colors = CardDefaults.cardColors(
-                containerColor = Color(0xFF121212)
-            ),
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF080808)),
             shape = RoundedCornerShape(8.dp)
         ) {
             if (state.terminalLog.isEmpty()) {
@@ -130,10 +120,10 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 
         // Macro Action Chips
         Text(
-            "Quick Macros",
+            "Quick Commands",
             fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.secondary,
+            color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.padding(bottom = 6.dp)
         )
 
@@ -144,19 +134,20 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                 .padding(bottom = 12.dp)
         ) {
             items(macroCommands) { macro ->
-                AssistChip(
-                    onClick = { viewModel.sendCommand(macro.command) },
-                    label = {
-                        Text(
-                            macro.name,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    },
-                    colors = AssistChipDefaults.assistChipColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                )
+                Card(
+                    modifier = Modifier
+                        .clickable { viewModel.sendCommand(macro.command) }
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(macro.command, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Text(macro.name, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
 
@@ -169,33 +160,34 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                 value = state.customCommand,
                 onValueChange = { viewModel.updateCustomCommand(it) },
                 placeholder = {
-                    Text("Enter command (e.g. AT Z, 19 02)...", fontSize = 13.sp)
+                    Text("Type command (e.g. 1A80)...", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(
                     onSend = { viewModel.sendCustomCommand() }
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
                 )
             )
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            IconButton(
+            Button(
                 onClick = { viewModel.sendCustomCommand() },
                 enabled = state.customCommand.isNotBlank(),
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(
-                        if (state.customCommand.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                ),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.height(56.dp)
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send Command",
-                    tint = if (state.customCommand.isNotBlank()) MaterialTheme.colorScheme.onPrimary else Color.Gray
-                )
+                Text("Send", fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -204,10 +196,10 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 @Composable
 fun TerminalLine(entry: TerminalEntry) {
     val textColor = when (entry.type) {
-        TerminalEntryType.SENT -> Color(0xFF80CBC4)       // Cyan/Teal
-        TerminalEntryType.RECEIVED -> Color(0xFFA5D6A7)   // Light Green
-        TerminalEntryType.SYSTEM -> Color(0xFFFFCC80)     // Amber/Orange
-        TerminalEntryType.ERROR -> Color(0xFFEF9A9A)      // Light Red
+        TerminalEntryType.SENT -> Color(0xFFFF9800)       // Orange/Yellow
+        TerminalEntryType.RECEIVED -> Color(0xFF00E676)   // Green
+        TerminalEntryType.SYSTEM -> Color(0xFFBDBDBD)     // Light Grey
+        TerminalEntryType.ERROR -> Color(0xFFE53935)      // Red
     }
 
     Row(

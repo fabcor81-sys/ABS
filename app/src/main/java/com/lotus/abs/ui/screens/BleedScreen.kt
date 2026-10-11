@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,20 +32,47 @@ fun BleedScreen(viewModel: BleedViewModel) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Bleed System", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(16.dp)
+    ) {
+        Text("Service / Bleed", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (state.activeOperation != null) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), 
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(), 
+                    horizontalArrangement = Arrangement.SpaceBetween, 
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Active Operation", color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha=0.7f), fontSize = 12.sp)
+                        Text(state.activeOperation!!, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 16.sp)
+                    }
+                    Text("${state.timeRemainingSec}s", fontWeight = FontWeight.Black, fontSize = 24.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+        }
 
         LazyColumn(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
                 Button(
                     onClick = { viewModel.sendCommand("30 49 01") }, 
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
                 ) {
-                    Text("Read Valve Status (30 49 01)")
+                    Text("Read Valve Status (30 49 01)", fontWeight = FontWeight.Bold)
                 }
             }
             item {
@@ -76,48 +104,38 @@ fun BleedScreen(viewModel: BleedViewModel) {
                 )
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(
                         onClick = { viewModel.runBleedSequence("PUMP", "30 02 07 01", "30 02 07 00", 15) }, 
                         enabled = state.activeOperation == null, 
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).height(56.dp),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("Pump Motor (15s)", fontSize = 12.sp)
+                        Text("Pump Motor (15s)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                     Button(
                         onClick = { viewModel.runBleedSequence("RELAY", "30 03 07 01", "30 03 07 00", 15) }, 
                         enabled = state.activeOperation == null, 
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).height(56.dp),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("Valve Relay (15s)", fontSize = 12.sp)
+                        Text("Valve Relay (15s)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
-        if (state.activeOperation != null) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), 
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp).fillMaxWidth(), 
-                    horizontalArrangement = Arrangement.SpaceBetween, 
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Running: ${state.activeOperation}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                    Text("${state.timeRemainingSec}s", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                }
-            }
-        }
+        Spacer(modifier = Modifier.height(16.dp))
 
+        Text("Log", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
         Card(
-            modifier = Modifier.fillMaxWidth().weight(0.5f).border(1.dp, Color(0xFF333333), RoundedCornerShape(8.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF121212))
+            modifier = Modifier.fillMaxWidth().height(150.dp).border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF080808)),
+            shape = RoundedCornerShape(8.dp)
         ) {
-            LazyColumn(state = terminalListState, modifier = Modifier.fillMaxSize().padding(8.dp)) {
+            LazyColumn(state = terminalListState, modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(state.terminalLog, key = { it.id }) { entry ->
-                    TerminalLine(entry)
+                    TerminalLine(entry) // Reuses TerminalLine from DiagnosticsScreen
                 }
             }
         }
@@ -126,15 +144,30 @@ fun BleedScreen(viewModel: BleedViewModel) {
 
 @Composable
 fun BleedOperationCard(title: String, btn1Text: String, btn2Text: String, onBtn1: () -> Unit, onBtn2: () -> Unit, disabled: Boolean) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(title, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onBtn1, enabled = !disabled, modifier = Modifier.weight(1f)) { 
-                    Text(btn1Text, fontSize = 12.sp) 
+    Card(
+        modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha=0.5f), RoundedCornerShape(8.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(title, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(bottom = 12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onBtn1, 
+                    enabled = !disabled, 
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                ) { 
+                    Text(btn1Text, fontSize = 12.sp, fontWeight = FontWeight.Bold) 
                 }
-                Button(onClick = onBtn2, enabled = !disabled, modifier = Modifier.weight(1f)) { 
-                    Text(btn2Text, fontSize = 12.sp) 
+                Button(
+                    onClick = onBtn2, 
+                    enabled = !disabled, 
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                ) { 
+                    Text(btn2Text, fontSize = 12.sp, fontWeight = FontWeight.Bold) 
                 }
             }
         }
