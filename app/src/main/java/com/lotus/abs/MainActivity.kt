@@ -38,8 +38,10 @@ import com.lotus.abs.ui.screens.DiagnosticsScreen
 import com.lotus.abs.ui.screens.HomeScreen
 import com.lotus.abs.ui.screens.LiveDataScreen
 import com.lotus.abs.ui.theme.LotusABSAndroidTheme
+import com.lotus.abs.ui.viewmodel.BleedViewModel
 import com.lotus.abs.ui.viewmodel.ConnectionViewModel
 import com.lotus.abs.ui.viewmodel.DiagnosticsViewModel
+import com.lotus.abs.ui.viewmodel.LiveDataViewModel
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -47,6 +49,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var database: LotusAbsDatabase
     private lateinit var connectionViewModel: ConnectionViewModel
     private lateinit var diagnosticsViewModel: DiagnosticsViewModel
+    private lateinit var liveDataViewModel: LiveDataViewModel
+    private lateinit var bleedViewModel: BleedViewModel
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -66,6 +70,8 @@ class MainActivity : ComponentActivity() {
 
         connectionViewModel = ConnectionViewModel(bluetoothManager)
         diagnosticsViewModel = DiagnosticsViewModel(bluetoothManager, database)
+        liveDataViewModel = LiveDataViewModel(bluetoothManager)
+        bleedViewModel = BleedViewModel(bluetoothManager)
 
         // Request permissions
         requestBluetoothPermissions()
@@ -74,7 +80,9 @@ class MainActivity : ComponentActivity() {
             LotusABSAndroidTheme {
                 MainApp(
                     connectionViewModel = connectionViewModel,
-                    diagnosticsViewModel = diagnosticsViewModel
+                    diagnosticsViewModel = diagnosticsViewModel,
+                    liveDataViewModel = liveDataViewModel,
+                    bleedViewModel = bleedViewModel
                 )
             }
         }
@@ -109,7 +117,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainApp(
     connectionViewModel: ConnectionViewModel,
-    diagnosticsViewModel: DiagnosticsViewModel
+    diagnosticsViewModel: DiagnosticsViewModel,
+    liveDataViewModel: LiveDataViewModel,
+    bleedViewModel: BleedViewModel
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -185,13 +195,13 @@ fun MainApp(
                     ConnectionScreen(connectionViewModel)
                 }
                 composable("live_data") {
-                    LiveDataScreen()
+                    LiveDataScreen(liveDataViewModel)
                 }
                 composable("dtc") {
                     DiagnosticsScreen(diagnosticsViewModel)
                 }
                 composable("bleed") {
-                    BleedScreen()
+                    BleedScreen(bleedViewModel)
                 }
             }
         }
