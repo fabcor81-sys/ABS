@@ -55,7 +55,7 @@ class DiagnosticsViewModel(
                 _state.emit(_state.value.copy(connectionState = connectionState))
                 when (connectionState) {
                     BluetoothManager.ConnectionState.CONNECTED -> {
-                        addSystemLog("Device connected.")
+                        addSystemLog("Device connected. Terminal active.")
                     }
                     BluetoothManager.ConnectionState.DISCONNECTED -> {
                         addSystemLog("Device disconnected.")
@@ -72,10 +72,14 @@ class DiagnosticsViewModel(
     private fun observeBluetoothData() {
         viewModelScope.launch {
             bluetoothManager.receivedData.collect { data ->
-                if (data.isNotBlank()) {
-                    addReceivedLog(data)
-                    parseDTCResponse(data)
+                val cleaned = data.replace("\r", "")
+                val lines = cleaned.split("\n")
+                for (line in lines) {
+                    if (line.isNotEmpty()) {
+                        addReceivedLog(line)
+                    }
                 }
+                parseDTCResponse(data)
             }
         }
     }
@@ -102,6 +106,9 @@ class DiagnosticsViewModel(
 
     fun sendCommand(command: String) {
         viewModelScope.launch {
+            if (_state.value.connectionState != BluetoothManager.ConnectionState.CONNECTED) {
+                addErrorLog("Not connected to ELM327/Bluetooth device. Connect on Home tab first.")
+            }
             addSentLog(command)
             _state.emit(_state.value.copy(isSending = true))
             try {

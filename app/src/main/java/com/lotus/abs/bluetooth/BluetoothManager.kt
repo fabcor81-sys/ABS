@@ -16,8 +16,12 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.InputStream
@@ -41,8 +45,13 @@ class BluetoothManager(private val context: Context) {
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
-    private val _receivedData = MutableStateFlow<String>("")
-    val receivedData: StateFlow<String> = _receivedData
+    // Stream received data (SharedFlow to avoid StateFlow conflation of duplicate responses)
+    private val _receivedData = MutableSharedFlow<String>(
+        replay = 0,
+        extraBufferCapacity = 100,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val receivedData: SharedFlow<String> = _receivedData.asSharedFlow()
 
     // Scanning state
     private val _scannedDevices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
@@ -320,11 +329,18 @@ class BluetoothManager(private val context: Context) {
             val cccdUUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
             val descriptor = characteristic.getDescriptor(cccdUUID)
             if (descriptor != null) {
+                val supportsIndication = (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
+                val descriptorValue = if (supportsIndication) {
+                    BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                } else {
+                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                }
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    gatt.writeDescriptor(descriptor, descriptorValue)
                 } else {
                     @Suppress("DEPRECATION")
-                    descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    descriptor.value = descriptorValue
                     @Suppress("DEPRECATION")
                     gatt.writeDescriptor(descriptor)
                 }
@@ -336,11 +352,7 @@ class BluetoothManager(private val context: Context) {
 
     private fun handleReceivedBytes(value: ByteArray) {
         val receivedString = String(value)
-        try {
-            _receivedData.tryEmit(receivedString)
-        } catch (e: Exception) {
-            Log.e("BluetoothManager", "Error emitting data: ${e.message}")
-        }
+        _receivedData.tryEmit(receivedString)
         Log.d("BluetoothManager", "BLE Received: $receivedString")
     }
 
@@ -363,19 +375,29 @@ class BluetoothManager(private val context: Context) {
     }
 
     private suspend fun sendCommandClassic(command: String) {
-        outputStream?.write((command + "\r").toByteArray())
+        val formattedCommand = if (command.endsWith("\r")) command else command + "\r"
+        outputStream?.write(formattedCommand.toByteArray())
         outputStream?.flush()
         Log.d("BluetoothManager", "Sent (Classic): $command")
     }
 
     private suspend fun sendCommandBLE(command: String) {
         writeCharacteristic?.let { characteristic ->
-            val bytes = (command + "\r").toByteArray()
+            val formattedCommand = if (command.endsWith("\r")) command else command + "\r"
+            val bytes = formattedCommand.toByteArray()
+            val supportsWriteWithoutResponse = (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
+            val writeType = if (supportsWriteWithoutResponse) {
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            } else {
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            }
+            characteristic.writeType = writeType
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 bluetoothGatt?.writeCharacteristic(
                     characteristic,
                     bytes,
-                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    writeType
                 )
             } else {
                 @Suppress("DEPRECATION")
@@ -383,8 +405,8 @@ class BluetoothManager(private val context: Context) {
                 @Suppress("DEPRECATION")
                 bluetoothGatt?.writeCharacteristic(characteristic)
             }
-            Log.d("BluetoothManager", "Sent (BLE): $command")
-        }
+            Log.d("BluetoothManager", "Sent (BLE): $command (writeType=$writeType)")
+        } ?: Log.e("BluetoothManager", "Cannot send BLE command: writeCharacteristic is null")
     }
 
     private suspend fun startListeningClassic() {
