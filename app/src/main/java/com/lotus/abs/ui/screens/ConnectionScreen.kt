@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -19,11 +18,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.lotus.abs.R
 import com.lotus.abs.bluetooth.BluetoothManager
 import com.lotus.abs.ui.viewmodel.ConnectionScreenState
 import com.lotus.abs.ui.viewmodel.ConnectionViewModel
@@ -176,7 +173,8 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                 Button(
                     onClick = { viewModel.disconnect() },
                     modifier = Modifier.weight(1f).height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("Disconnect", fontWeight = FontWeight.Bold)
                 }
@@ -184,7 +182,8 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                 Button(
                     onClick = { viewModel.disconnect() },
                     modifier = Modifier.weight(1f).height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("Back to Scanned Devices")
                 }
@@ -193,7 +192,8 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                     Button(
                         onClick = { viewModel.stopScan() },
                         modifier = Modifier.weight(1f).height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Text("Stop Scan", fontWeight = FontWeight.Bold)
                     }
@@ -201,7 +201,8 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                     Button(
                         onClick = { viewModel.refreshDeviceList() },
                         modifier = Modifier.weight(1f).height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Text("Scan for Devices", fontWeight = FontWeight.Bold)
                     }

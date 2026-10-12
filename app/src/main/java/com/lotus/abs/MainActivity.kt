@@ -7,9 +7,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Build
@@ -21,7 +21,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -142,19 +147,44 @@ fun MainApp(
             ModalDrawerSheet(
                 drawerContainerColor = MaterialTheme.colorScheme.surface
             ) {
-                Text(
-                    text = "LOTUS ABS",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(24.dp)
-                )
-                HorizontalDivider()
+                // Drawer Header
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.lotus_logo),
+                        contentDescription = "Lotus Logo",
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                "LOTUS ",
+                                color = Color.White,
+                                fontSize = 20.sp,
+                                fontFamily = FontFamily.SansSerif,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "ABS",
+                                color = com.lotus.abs.ui.theme.LotusYellow,
+                                fontSize = 20.sp,
+                                fontFamily = FontFamily.SansSerif,
+                                fontWeight = FontWeight.Black,
+                                fontStyle = FontStyle.Italic
+                            )
+                        }
+                    }
+                }
+                
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                 Spacer(Modifier.height(8.dp))
                 menuItems.forEach { (route, label, icon) ->
                     NavigationDrawerItem(
                         icon = { Icon(icon, contentDescription = label) },
-                        label = { Text(label) },
+                        label = { Text(label, fontWeight = FontWeight.Bold) },
                         selected = currentRoute == route,
                         onClick = {
                             navController.navigate(route) {
@@ -180,19 +210,34 @@ fun MainApp(
     ) {
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text(menuItems.find { it.first == currentRoute }?.second ?: "Lotus ABS") },
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Menu")
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        titleContentColor = MaterialTheme.colorScheme.primary,
-                        navigationIconContentColor = MaterialTheme.colorScheme.primary
+                if (currentRoute != "home") {
+                    TopAppBar(
+                        title = { Text(menuItems.find { it.first == currentRoute }?.second ?: "Lotus ABS", fontWeight = FontWeight.Bold) },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, contentDescription = "Menu")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            titleContentColor = MaterialTheme.colorScheme.primary,
+                            navigationIconContentColor = MaterialTheme.colorScheme.primary
+                        )
                     )
-                )
+                } else {
+                    // Custom transparent TopAppBar for Home screen
+                    TopAppBar(
+                        title = { },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent
+                        )
+                    )
+                }
             }
         ) { innerPadding ->
             NavHost(
