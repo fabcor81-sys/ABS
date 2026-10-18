@@ -1,0 +1,150 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="400dp"
+    android:height="225dp"
+    android:viewportWidth="800"
+    android:viewportHeight="450">
+
+    <!-- Background Ground Shadow & Studio Lighting -->
+    <path
+        android:fillColor="#0B0E11"
+        android:pathData="M0,0 h800 v450 h-800 z" />
+
+    <path
+        android:fillColor="#151A21"
+        android:pathData="M0,280 L800,260 L800,450 L0,450 Z" />
+
+    <!-- Car Shadow -->
+    <path
+        android:fillColor="#040507"
+        android:pathData="M60,370 C200,385 600,385 750,360 C780,350 720,320 500,320 C300,320 100,340 60,370 Z" />
+
+    <!-- Rear Spoiler Wing -->
+    <path
+        android:fillColor="#22262B"
+        android:strokeColor="#FFFFCC00"
+        android:strokeWidth="1.5"
+        android:pathData="M580,180 L730,170 L740,195 L590,205 Z" />
+    <path
+        android:fillColor="#111316"
+        android:pathData="M610,203 L615,240 L628,240 L623,202 Z" />
+    <path
+        android:fillColor="#111316"
+        android:pathData="M690,198 L695,235 L708,235 L703,196 Z" />
+
+    <!-- Main Car Body Silhouette (Lotus Yellow #FFCC00) -->
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M80,320
+                          C90,300 110,285 140,280
+                          C180,270 230,265 290,240
+                          C350,200 410,165 480,165
+                          C550,165 620,190 680,225
+                          C720,245 750,270 760,295
+                          C765,310 755,335 720,345
+                          C660,355 520,360 380,360
+                          C250,360 140,355 90,340
+                          C75,335 70,328 80,320 Z" />
+
+    <!-- Roof Scoop (Iconic Exige S2 Roof Intake) -->
+    <path
+        android:fillColor="#1C2026"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="1.5"
+        android:pathData="M420,165 C450,150 500,150 520,165 L510,178 L430,178 Z" />
+
+    <!-- Roof & Windshield Glass -->
+    <path
+        android:fillColor="#12161B"
+        android:strokeColor="#3A424D"
+        android:strokeWidth="2"
+        android:pathData="M310,235 C360,195 410,175 475,175 C530,175 580,200 625,230 L550,235 C430,235 360,235 310,235 Z" />
+
+    <!-- Side Window Glass -->
+    <path
+        android:fillColor="#1A2028"
+        android:pathData="M485,180 C535,180 575,200 615,225 L545,228 C505,210 485,195 485,180 Z" />
+
+    <!-- Front Hood Bonnet Cutlines & Ventilation Vents -->
+    <path
+        android:fillColor="#1A1E24"
+        android:strokeColor="#D4A700"
+        android:strokeWidth="1.5"
+        android:pathData="M190,282 C220,265 260,255 295,252 L285,275 C250,278 215,288 190,282 Z" />
+
+    <path
+        android:fillColor="#1A1E24"
+        android:strokeColor="#D4A700"
+        android:strokeWidth="1.5"
+        android:pathData="M230,250 C260,238 290,232 320,230 L310,248 C280,250 250,258 230,250 Z" />
+
+    <!-- Iconic Dual Elongated Headlights (Lotus Exige S2) -->
+    <path
+        android:fillColor="#E6F4FF"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="2"
+        android:pathData="M150,290 C160,270 185,265 200,275 C190,295 170,305 150,290 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M164,282 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+
+    <path
+        android:fillColor="#E6F4FF"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="2"
+        android:pathData="M240,260 C250,245 270,240 282,248 C275,262 258,270 240,260 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M253,252 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+
+    <!-- Front Radiator Grille & Lower Air Splitter -->
+    <path
+        android:fillColor="#101215"
+        android:strokeColor="#333333"
+        android:strokeWidth="1"
+        android:pathData="M110,325 C160,320 230,315 280,318 L275,340 C220,342 150,345 110,338 Z" />
+
+    <!-- Side Air Intake Scoop (Exige S2 Side Pod) -->
+    <path
+        android:fillColor="#101215"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="1"
+        android:pathData="M510,270 C540,265 570,265 585,280 L570,315 C540,310 515,300 510,270 Z" />
+
+    <!-- Front Left Wheel & Rim -->
+    <path
+        android:fillColor="#181A1D"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="2"
+        android:pathData="M130,315 C130,280 160,270 190,285 C215,300 215,340 185,355 C150,360 130,345 130,315 Z" />
+    <path
+        android:fillColor="#2C3138"
+        android:strokeColor="#888888"
+        android:strokeWidth="2"
+        android:pathData="M146,318 a24,24 0 1,0 48,0 a24,24 0 1,0 -48,0" />
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M162,318 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+
+    <!-- Rear Left Wheel & Rim -->
+    <path
+        android:fillColor="#181A1D"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="2"
+        android:pathData="M580,295 C580,255 620,245 660,265 C695,285 695,335 655,350 C610,355 580,335 580,295 Z" />
+    <path
+        android:fillColor="#2C3138"
+        android:strokeColor="#888888"
+        android:strokeWidth="2.5"
+        android:pathData="M603,298 a32,32 0 1,0 64,0 a32,32 0 1,0 -64,0" />
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M625,298 a10,10 0 1,0 20,0 a10,10 0 1,0 -20,0" />
+
+    <!-- Lotus Badge on Nose -->
+    <path
+        android:fillColor="#FFCC00"
+        android:strokeColor="#000000"
+        android:strokeWidth="1"
+        android:pathData="M125,305 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+
+</vector>

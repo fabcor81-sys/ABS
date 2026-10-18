@@ -71,30 +71,20 @@ class DiagnosticsViewModel(
 
     private fun observeBluetoothData() {
         viewModelScope.launch {
-            // Buffer to hold partial lines
             var responseBuffer = ""
 
             bluetoothManager.receivedData.collect { data ->
                 val cleaned = data.replace("\r", "")
                 responseBuffer += cleaned
 
-                // Check if buffer contains a newline or prompt char
                 if (responseBuffer.contains("\n") || responseBuffer.endsWith(">")) {
-                    // We split by newline, handle any prompt >
                     val lines = responseBuffer.split("\n")
                     for (i in lines.indices) {
                         val line = lines[i].trim()
                         if (line.isNotEmpty()) {
-                            // If this is the last line and it's just ">", append it to previous log or output on its own
-                            if (i == lines.lastIndex && line == ">" && lines.size > 1) {
-                                // Add to previous line if possible, or just emit ">"
-                                addReceivedLog(line)
-                            } else {
-                                addReceivedLog(line)
-                            }
+                            addReceivedLog(line)
                         }
                     }
-                    // clear buffer after processing
                     responseBuffer = ""
                 }
                 
@@ -145,6 +135,20 @@ class DiagnosticsViewModel(
         addSystemLog("Terminal log cleared.")
     }
 
+    fun clearAllDTCs() {
+        viewModelScope.launch {
+            sendCommand("14 FF 00")
+            dtcDao.clearAll()
+            addSystemLog("Cancellazione codici guasto (DTC) eseguita.")
+        }
+    }
+
+    fun deleteDTC(dtcRecord: DTCRecord) {
+        viewModelScope.launch {
+            dtcDao.delete(dtcRecord)
+        }
+    }
+
     private fun addSentLog(text: String) {
         val entry = TerminalEntry(text = "> $text", type = TerminalEntryType.SENT)
         appendLog(entry)
@@ -175,19 +179,20 @@ class DiagnosticsViewModel(
         viewModelScope.launch {
             try {
                 val dtcCodes = OBD2Parser.parseDTC(response)
-                if (response.contains("CLEARED")) {
+                if (response.contains("CLEARED") || response.contains("44 FF")) {
                     dtcDao.clearAll()
-                    addSystemLog("DTC database cleared.")
+                    addSystemLog("Database DTC azzerato.")
                 } else if (dtcCodes.isNotEmpty()) {
-                    dtcCodes.forEach { code ->
+                    dtcCodes.forEach { rawCode ->
+                        val normalizedCode = normalizeDTC(rawCode)
                         val dtcRecord = DTCRecord(
-                            code = code,
-                            description = decodeDTC(code),
-                            status = "Active"
+                            code = normalizedCode,
+                            description = decodeDTC(normalizedCode),
+                            status = "Attivo"
                         )
                         dtcDao.insert(dtcRecord)
                     }
-                    addSystemLog("Parsed ${dtcCodes.size} DTC code(s).")
+                    addSystemLog("Rilevati e decodificati ${dtcCodes.size} codice/i di errore Lotus ABS.")
                 }
             } catch (e: Exception) {
                 // Ignore parse errors for non-DTC raw responses
@@ -195,25 +200,80 @@ class DiagnosticsViewModel(
         }
     }
 
-    fun deleteDTC(dtcRecord: DTCRecord) {
-        viewModelScope.launch {
-            dtcDao.delete(dtcRecord)
+    private fun normalizeDTC(code: String): String {
+        val clean = code.uppercase().trim()
+        // Convert P-prefix to C-prefix for ABS specific chassis DTCs
+        return when {
+            clean == "P0035" -> "C0035"
+            clean == "P0040" -> "C0040"
+            clean == "P0045" -> "C0045"
+            clean == "P0050" -> "C0050"
+            clean == "P0060" -> "C0060"
+            clean == "P0065" -> "C0065"
+            clean == "P0070" -> "C0070"
+            clean == "P0075" -> "C0075"
+            clean == "P0080" -> "C0080"
+            clean == "P0085" -> "C0085"
+            clean == "P0090" -> "C0090"
+            clean == "P0095" -> "C0095"
+            clean == "P0110" -> "C0110"
+            clean == "P0121" -> "C0121"
+            clean == "P0161" -> "C0161"
+            clean == "P0232" -> "C0232"
+            clean == "P0245" -> "C0245"
+            clean == "P0550" -> "C0550"
+            clean == "P0800" -> "C0800"
+            else -> clean
         }
     }
 
-    private fun decodeDTC(code: String): String {
-        return when (code) {
-            "C0035" -> "Front Left Wheel Speed Sensor Circuit"
-            "C0040" -> "Front Right Wheel Speed Sensor Circuit"
-            "C0045" -> "Rear Left Wheel Speed Sensor Circuit"
-            "C0050" -> "Rear Right Wheel Speed Sensor Circuit"
-            "C0110" -> "ABS Pump Motor Circuit Malfunction"
-            "C0121" -> "ABS Valve Relay Circuit Malfunction"
-            "C0161" -> "ABS Brake Switch Circuit"
-            "C0245" -> "Wheel Speed Sensor Frequency Error"
-            "C0550" -> "ECU Malfunction / Internal Error"
-            "P0100" -> "Mass Air Flow Circuit"
-            else -> "Lotus ABS Fault Code: $code"
+    fun decodeDTC(code: String): String {
+        val cleanCode = code.uppercase().trim().replace(" ", "").replace("-", "")
+        return when {
+            cleanCode.contains("C0035") || cleanCode.contains("0035") ->
+                "Sensore Velocità Ruota Anteriore Sinistra (LF): cortocircuito, circuito aperto o assenza segnale"
+            cleanCode.contains("C0040") || cleanCode.contains("0040") ->
+                "Sensore Velocità Ruota Anteriore Destra (RF): cortocircuito, circuito aperto o assenza segnale"
+            cleanCode.contains("C0045") || cleanCode.contains("0045") ->
+                "Sensore Velocità Ruota Posteriore Sinistra (LR): cortocircuito, circuito aperto o assenza segnale"
+            cleanCode.contains("C0050") || cleanCode.contains("0050") ->
+                "Sensore Velocità Ruota Posteriore Destra (RR): cortocircuito, circuito aperto o assenza segnale"
+            cleanCode.contains("C0060") || cleanCode.contains("0060") ->
+                "Elettrovalvola Scarico (DUMP) Anteriore Sinistra (LF): guasto circuito elettrico"
+            cleanCode.contains("C0065") || cleanCode.contains("0065") ->
+                "Elettrovalvola Ingresso (ISO) Anteriore Sinistra (LF): guasto circuito elettrico"
+            cleanCode.contains("C0070") || cleanCode.contains("0070") ->
+                "Elettrovalvola Scarico (DUMP) Anteriore Destra (RF): guasto circuito elettrico"
+            cleanCode.contains("C0075") || cleanCode.contains("0075") ->
+                "Elettrovalvola Ingresso (ISO) Anteriore Destra (RF): guasto circuito elettrico"
+            cleanCode.contains("C0080") || cleanCode.contains("0080") ->
+                "Elettrovalvola Scarico (DUMP) Posteriore Sinistra (LR): guasto circuito elettrico"
+            cleanCode.contains("C0085") || cleanCode.contains("0085") ->
+                "Elettrovalvola Ingresso (ISO) Posteriore Sinistra (LR): guasto circuito elettrico"
+            cleanCode.contains("C0090") || cleanCode.contains("0090") ->
+                "Elettrovalvola Scarico (DUMP) Posteriore Destra (RR): guasto circuito elettrico"
+            cleanCode.contains("C0095") || cleanCode.contains("0095") ->
+                "Elettrovalvola Ingresso (ISO) Posteriore Destra (RR): guasto circuito elettrico"
+            cleanCode.contains("C0110") || cleanCode.contains("0110") ->
+                "Pompa di Ritorno ABS: pompa bloccata, circuito aperto o in cortocircuito"
+            cleanCode.contains("C0121") || cleanCode.contains("0121") ->
+                "Relè Principale Elettrovalvole ABS: guasto circuito di comando"
+            cleanCode.contains("C0161") || cleanCode.contains("0161") ->
+                "Interruttore Luci Freno (Pedale Stop): guasto circuito o segnale incongruente"
+            cleanCode.contains("C0232") || cleanCode.contains("0232") ->
+                "Spia Impianto Frenante / Spia ABS: tensione anomala o circuito aperto"
+            cleanCode.contains("C0245") || cleanCode.contains("0245") ->
+                "Segnale Velocità Ruota Irregolare: errore di frequenza o dente mancante"
+            cleanCode.contains("C0550") || cleanCode.contains("0550") ->
+                "Centralina Elettronica ECU ABS: errore interno memoria o guasto hardware"
+            cleanCode.contains("C0800") || cleanCode.contains("0800") ->
+                "Tensione Alimentazione Centralina ABS: tensione alta o bassa (fuori tolleranza)"
+            cleanCode.contains("P0100") -> "Debimetro / Misuratore Flusso Aria (MAF): anomalia circuito"
+            cleanCode.contains("P0110") -> "Sensore Temperatura Aria Aspirata (IAT): anomalia circuito"
+            cleanCode.contains("P0120") -> "Sensore Posizione Farfalla (TPS): anomalia circuito"
+            cleanCode.contains("P0300") -> "Mancate Accensioni Cilindri Multiple / Casuali"
+            cleanCode.contains("U0121") -> "Comunicazione Persa con la Centralina ABS / Controllo Freni"
+            else -> "Codice Errore Diagnostico Lotus ABS ($code)"
         }
     }
 }

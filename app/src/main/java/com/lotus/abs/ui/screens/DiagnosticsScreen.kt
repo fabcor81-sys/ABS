@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.lotus.abs.data.entity.DTCRecord
+import com.lotus.abs.ui.theme.LotusYellow
 import com.lotus.abs.ui.viewmodel.DiagnosticsViewModel
 import com.lotus.abs.ui.viewmodel.TerminalEntry
 import com.lotus.abs.ui.viewmodel.TerminalEntryType
@@ -47,7 +50,8 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 
     val macroCommands = listOf(
         MacroCommand("Read DTC", "18 02"),
-        MacroCommand("Clear DTC", "14 FF FF 00")
+        MacroCommand("Clear DTC", "14 FF 00"),
+        MacroCommand("Read VIN", "1A 90")
     )
 
     Column(
@@ -58,29 +62,104 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
     ) {
         // Header Row
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 12.dp)
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Diagnostica ABS / DTC",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Text(
+                    text = "Lettura, decodifica e cancellazione errori ECU",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // Section 1: Detected DTC Errors Card
+        if (state.dtcList.isNotEmpty()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+                    .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f), RoundedCornerShape(12.dp)),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = "DTC Warning",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Errori Rilevati (${state.dtcList.size})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+
+                        Button(
+                            onClick = { viewModel.clearAllDTCs() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("Cancella Tutti", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        state.dtcList.forEach { record ->
+                            DTCItemCard(record = record, onDelete = { viewModel.deleteDTC(record) })
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 2: Terminal Window
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "Command & Log",
-                fontSize = 18.sp,
+                "Terminal Log",
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-
-            IconButton(onClick = { viewModel.clearTerminal() }) {
+            IconButton(
+                onClick = { viewModel.clearTerminal() },
+                modifier = Modifier.size(28.dp)
+            ) {
                 Icon(
                     imageVector = Icons.Default.Delete,
-                    contentDescription = "Clear Terminal",
+                    contentDescription = "Pulisci Log",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
 
-        // Terminal Console Box
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -89,41 +168,25 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
             colors = CardDefaults.cardColors(containerColor = Color(0xFF080808)),
             shape = RoundedCornerShape(8.dp)
         ) {
-            if (state.terminalLog.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "Console empty. Send a command or tap a macro below.",
-                        color = Color(0xFF666666),
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            } else {
-                LazyColumn(
-                    state = terminalListState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    items(state.terminalLog, key = { it.id }) { entry ->
-                        TerminalLine(entry)
-                    }
+            LazyColumn(
+                state = terminalListState,
+                modifier = Modifier.fillMaxSize().padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                items(state.terminalLog, key = { it.id }) { entry ->
+                    TerminalLine(entry)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Macro Action Chips
         Text(
-            "Quick Commands",
-            fontSize = 14.sp,
+            "Comandi Rapidi",
+            fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 6.dp)
         )
 
@@ -131,7 +194,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp)
+                .padding(bottom = 10.dp)
         ) {
             items(macroCommands) { macro ->
                 Card(
@@ -141,10 +204,10 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(macro.command, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Text(macro.command, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
                         Text(macro.name, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -160,7 +223,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                 value = state.customCommand,
                 onValueChange = { viewModel.updateCustomCommand(it) },
                 placeholder = {
-                    Text("Type command (e.g. 1A80)...", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Invia comando custom (es. 18 02)...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
@@ -185,9 +248,64 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                     disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
                 ),
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(56.dp)
+                modifier = Modifier.height(52.dp)
             ) {
-                Text("Send", fontWeight = FontWeight.Bold)
+                Icon(imageVector = Icons.AutoMirrored.Filled.Send, contentDescription = "Invia")
+            }
+        }
+    }
+}
+
+@Composable
+fun DTCItemCard(record: DTCRecord, onDelete: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = Color(0xFFDC2626),
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Text(
+                            text = record.code,
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Text(
+                        text = "Stato: ${record.status}",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = record.description,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Elimina DTC",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

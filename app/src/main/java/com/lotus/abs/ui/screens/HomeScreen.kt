@@ -5,7 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Build
@@ -31,19 +33,22 @@ import com.lotus.abs.ui.theme.LotusYellow
 
 @Composable
 fun HomeScreen(navController: NavController) {
+    val scrollState = rememberScrollState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .verticalScroll(scrollState)
             .padding(16.dp)
     ) {
         // Racing Header
         Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Image(
-                painter = painterResource(id = R.drawable.lotus_logo),
+                painter = painterResource(id = R.drawable.lotus_cars_logo),
                 contentDescription = "Lotus Logo",
                 modifier = Modifier.size(64.dp)
             )
@@ -75,34 +80,53 @@ fun HomeScreen(navController: NavController) {
             }
         }
 
-        // Hero Image
-        Image(
-            painter = painterResource(id = R.drawable.exige_s2),
-            contentDescription = "Lotus Exige S2",
+        // Hero Image Card
+        Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(200.dp)
                 .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
-            contentScale = ContentScale.Crop
-        )
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF141619)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.exige_s2_side),
+                contentDescription = "Lotus Exige S2",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(130.dp)
+                    .padding(4.dp),
+                contentScale = ContentScale.Fit
+            )
+        }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         // Navigation Grid
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             HomeCard(title = "DEVICE\nCONNECTION", icon = Icons.Default.Bluetooth, modifier = Modifier.weight(1f)) { navController.navigate("connection") }
             HomeCard(title = "LIVE\nDATA", icon = Icons.Default.Speed, modifier = Modifier.weight(1f)) { navController.navigate("live_data") }
         }
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             HomeCard(title = "DTC\nERRORS", icon = Icons.Default.Warning, modifier = Modifier.weight(1f)) { navController.navigate("dtc") }
             HomeCard(title = "BLEED\nSYSTEM", icon = Icons.Default.Build, modifier = Modifier.weight(1f)) { navController.navigate("bleed") }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            HomeCard(
+                title = "BLEEDING TEST (PULSAZIONE IDRAULICA)",
+                icon = Icons.Default.Build,
+                modifier = Modifier.fillMaxWidth().height(80.dp),
+                isHorizontal = true
+            ) { navController.navigate("bleed_test") }
         }
     }
 }
@@ -112,11 +136,12 @@ fun HomeCard(
     title: String,
     icon: ImageVector,
     modifier: Modifier = Modifier,
+    isHorizontal: Boolean = false,
     onClick: () -> Unit
 ) {
     Card(
         modifier = modifier
-            .aspectRatio(1.2f)
+            .then(if (!isHorizontal) Modifier.aspectRatio(1.25f) else Modifier)
             .clickable { onClick() }
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
         colors = CardDefaults.cardColors(
@@ -124,26 +149,50 @@ fun HomeCard(
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                modifier = Modifier.size(36.dp),
-                tint = LotusYellow
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                fontFamily = FontFamily.SansSerif,
-                color = Color.White
-            )
+        if (!isHorizontal) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    modifier = Modifier.size(32.dp),
+                    tint = LotusYellow
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = title,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    fontFamily = FontFamily.SansSerif,
+                    color = Color.White
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    modifier = Modifier.size(28.dp),
+                    tint = LotusYellow
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = title,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    fontFamily = FontFamily.SansSerif,
+                    color = Color.White
+                )
+            }
         }
     }
 }

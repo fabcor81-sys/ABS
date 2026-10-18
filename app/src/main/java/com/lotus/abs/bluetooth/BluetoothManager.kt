@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.lotus.abs.util.FileLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -410,7 +411,7 @@ class BluetoothManager(private val context: Context) {
     private fun handleReceivedBytes(value: ByteArray) {
         val receivedString = String(value, Charsets.US_ASCII)
         _receivedData.tryEmit(receivedString)
-        Log.d("BluetoothManager", "BLE Received: $receivedString")
+        FileLogger.logTerminal("<", receivedString.trim())
     }
 
     suspend fun sendCommand(command: String) {
@@ -420,7 +421,7 @@ class BluetoothManager(private val context: Context) {
                     DeviceType.CLASSIC -> sendCommandClassic(command)
                     DeviceType.BLE -> sendCommandBLE(command)
                     else -> {
-                        Log.w("BluetoothManager", "Unknown device type for sending, attempting Classic SPP then BLE")
+                        FileLogger.w("BluetoothManager", "Unknown device type for sending, attempting Classic SPP then BLE")
                         try {
                             sendCommandClassic(command)
                         } catch (e: Exception) {
@@ -429,7 +430,7 @@ class BluetoothManager(private val context: Context) {
                     }
                 }
             } catch (e: Exception) {
-                Log.e("BluetoothManager", "Send failed: ${e.message}")
+                FileLogger.e("BluetoothManager", "Send failed: ${e.message}", e)
                 _connectionState.emit(ConnectionState.ERROR)
             }
         }
@@ -439,7 +440,7 @@ class BluetoothManager(private val context: Context) {
         val formattedCommand = if (command.endsWith("\r")) command else command + "\r"
         outputStream?.write(formattedCommand.toByteArray(Charsets.US_ASCII))
         outputStream?.flush()
-        Log.d("BluetoothManager", "Sent (Classic): $command")
+        FileLogger.logTerminal(">", command.trim())
     }
 
     private suspend fun sendCommandBLE(command: String) {
@@ -461,7 +462,7 @@ class BluetoothManager(private val context: Context) {
                     bytes,
                     writeType
                 )
-                Log.d("BluetoothManager", "writeCharacteristic (type $writeType) result code=$result")
+                FileLogger.d("BluetoothManager", "writeCharacteristic (type $writeType) result code=$result")
                 if (result != 0) {
                     characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                     result = bluetoothGatt?.writeCharacteristic(
@@ -469,17 +470,17 @@ class BluetoothManager(private val context: Context) {
                         bytes,
                         BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                     )
-                    Log.d("BluetoothManager", "Retry writeCharacteristic (DEFAULT) result code=$result")
+                    FileLogger.d("BluetoothManager", "Retry writeCharacteristic (DEFAULT) result code=$result")
                 }
             } else {
                 @Suppress("DEPRECATION")
                 characteristic.value = bytes
                 @Suppress("DEPRECATION")
                 val success = bluetoothGatt?.writeCharacteristic(characteristic)
-                Log.d("BluetoothManager", "writeCharacteristic success=$success")
+                FileLogger.d("BluetoothManager", "writeCharacteristic success=$success")
             }
-            Log.d("BluetoothManager", "Sent (BLE): '$command' to ${characteristic.uuid} (writeType=$writeType)")
-        } ?: Log.e("BluetoothManager", "Cannot send BLE command: writeCharacteristic is null")
+            FileLogger.logTerminal(">", command.trim())
+        } ?: FileLogger.e("BluetoothManager", "Cannot send BLE command: writeCharacteristic is null")
     }
 
     private suspend fun startListeningClassic() {
@@ -493,9 +494,9 @@ class BluetoothManager(private val context: Context) {
                     if (bytes > 0) {
                         val receivedString = String(buffer, 0, bytes, Charsets.US_ASCII)
                         _receivedData.emit(receivedString)
-                        Log.d("BluetoothManager", "Received (Classic): $receivedString")
+                        FileLogger.logTerminal("<", receivedString.trim())
                     } else if (bytes == -1) {
-                        Log.w("BluetoothManager", "InputStream reached EOF (-1)")
+                        FileLogger.w("BluetoothManager", "InputStream reached EOF (-1)")
                         break
                     }
                 } catch (e: IOException) {
