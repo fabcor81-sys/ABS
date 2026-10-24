@@ -20,7 +20,7 @@ data class UsbDeviceItem(
     val productId: Int
 )
 
-class UsbKLineManager(private val context: Context) {
+class UsbKLineManager(private val context: Context? = null) {
 
     companion object {
         private const val TAG = "OBD_USB_DEBUG"
@@ -30,16 +30,12 @@ class UsbKLineManager(private val context: Context) {
     }
 
     val usbManager: UsbManager? by lazy {
-        context.getSystemService(Context.USB_SERVICE) as? UsbManager
+        context?.getSystemService(Context.USB_SERVICE) as? UsbManager
     }
 
     private var usbReceiver: BroadcastReceiver? = null
     private var onPermissionGrantedCallback: ((Boolean) -> Unit)? = null
 
-    /**
-     * Cerca ed elenca i dispositivi USB Seriali collegati.
-     * Riconosce esplicitamente FTDI VID 0x0403 e PID 0x6001.
-     */
     fun getConnectedUsbDevices(): List<UsbDeviceItem> {
         val manager = usbManager ?: return emptyList()
         val availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(manager)
@@ -106,7 +102,7 @@ class UsbKLineManager(private val context: Context) {
         onPermissionGrantedCallback = onResult
 
         val intent = Intent(ACTION_USB_PERMISSION).apply {
-            setPackage(context.packageName)
+            context?.packageName?.let { setPackage(it) }
         }
 
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -140,9 +136,9 @@ class UsbKLineManager(private val context: Context) {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(usbReceiver, filter, Context.RECEIVER_EXPORTED)
+            context?.registerReceiver(usbReceiver, filter, Context.RECEIVER_EXPORTED)
         } else {
-            context.registerReceiver(usbReceiver, filter)
+            context?.registerReceiver(usbReceiver, filter)
         }
 
         Log.d(TAG, "Richiesta popup permesso USB a UsbManager per ${driver.device.deviceName}...")
@@ -152,7 +148,7 @@ class UsbKLineManager(private val context: Context) {
     fun unregisterReceiver() {
         try {
             usbReceiver?.let {
-                context.unregisterReceiver(it)
+                context?.unregisterReceiver(it)
                 usbReceiver = null
             }
         } catch (_: Exception) {}

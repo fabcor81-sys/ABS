@@ -3,6 +3,10 @@ package com.lotus.abs.usb
 import android.os.SystemClock
 import android.util.Log
 import com.hoho.android.usbserial.driver.UsbSerialPort
+import com.lotus.abs.transport.CommandCategory
+import com.lotus.abs.transport.CommandStatus
+import com.lotus.abs.transport.DiagnosticCommandResult
+import com.lotus.abs.transport.DiagnosticTransport
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.Locale
@@ -91,10 +95,6 @@ data class Kwp2000Frame(
             )
         }
 
-        /**
-         * Parsea e valida rigorosamente un frame KWP2000.
-         * Restituisce null se la lunghezza o il checksum non sono validi.
-         */
         fun parseFrame(bytes: ByteArray): Kwp2000Frame? {
             if (bytes.size < 5) return null
             val fmt = bytes[0]
@@ -169,8 +169,15 @@ class Kwp2000KLineTransport(
     private val port: UsbSerialPort,
     val targetAddress: Byte = 0x2B.toByte(), // ECU Lotus EBC430 Target Address
     val sourceAddress: Byte = 0xF1.toByte(), // Tester Source Address
-    var isEchoFilterEnabled: Boolean = true
-) {
+    var isEchoFilterEnabled: Boolean = true,
+    var isRealHardwareActuatorExecutionEnabled: Boolean = false // Safety Guard for real USB hardware
+) : DiagnosticTransport {
+
+    override val transportName: String = "VAG-COM KKL 409.1 USB FTDI"
+
+    override val isConnected: Boolean
+        get() = (state == KwpState.SESSION_ACTIVE || state == KwpState.PORT_OPEN)
+
     companion object {
         private const val TAG = "KWP2000_KLINE"
         const val DEFAULT_READ_TIMEOUT_MS = 1500
@@ -181,12 +188,26 @@ class Kwp2000KLineTransport(
             "2101", "2102",
             "2130", "2131", "2132", "2133", "2134"
         )
+
+        // Comandi attuatori definiti nelle macro dell'applicazione
+        val ALLOWED_ACTUATOR_COMMANDS_HEX = setOf(
+            "30020701", "30020700", // ABS Pump ON/OFF
+            "30110701", "30110700", // DUMP LF
+            "30120701", "30120700", // ISO LF
+            "30210701", "30210700", // DUMP RF
+            "30220701", "30220700", // ISO RF
+            "30310701", "30310700", // DUMP LR
+            "30320701", "30320700", // ISO LR
+            "30410701", "30410700", // DUMP RR
+            "30420701", "30420700", // ISO RR
+            "30030701", "30030700"  // Valve Relay
+        )
     }
 
     private val streamDecoder by lazy {
         Kwp2000StreamDecoder(
-            expectedTargetAddress = sourceAddress, // Nel messaggio di risposta, il Target è il Tester (0xF1)
-            expectedSourceAddress = targetAddress, // Nel messaggio di risposta, la Source è l'ECU (0x2B)
+            expectedTargetAddress = sourceAddress,
+            expectedSourceAddress = targetAddress,
             isEchoFilterEnabled = isEchoFilterEnabled
         )
     }
@@ -210,14 +231,116 @@ class Kwp2000KLineTransport(
         }
     }
 
-    /**
-     * Fast Init KWP2000 (ISO 14230):
-     * 1. Linea K Idle HIGH (>300ms)
-     * 2. LOW pulse ~25 ms via setBreak(true)
-     * 3. HIGH pulse ~25 ms via setBreak(false)
-     * 4. Trasmissione StartCommunication: 81 [Target] [Source] 81 [CS]
-     * Robustezza: Garantisce che setBreak(false) venga SEMPRE eseguito in un blocco finally.
-     */
+    override suspend fun executeCommand(
+        commandHex: String,
+        category: CommandCategory,
+        timeoutMs: Long
+    ): DiagnosticCommandResult {
+        val cleanCmd = commandHex.replace(" ", "").uppercase(Locale.US)
+
+        if (!isConnected) {
+            return DiagnosticCommandResult(
+                status = CommandStatus.DISCONNECTED,
+                isSuccess = false,
+                requestHex = cleanCmd,
+                statusText = "USB KKL Transport disconnected"
+            )
+        }
+
+        if (category == CommandCategory.ACTUATOR_CONTROL) {
+            if (!isRealHardwareActuatorExecutionEnabled) {
+                val msg = "BLOCKED_SAFETY_GUARD: Real USB actuator execution is disabled in this phase."
+                Log.w(TAG, msg)
+                return DiagnosticCommandResult(
+                    status = CommandStatus.BLOCKED_SAFETY_GUARD,
+                    isSuccess = false,
+                    requestHex = cleanCmd,
+                    statusText = msg
+                )
+            }
+            if (!ALLOWED_ACTUATOR_COMMANDS_HEX.contains(cleanCmd)) {
+                val msg = "BLOCKED_NOT_IN_WHITELIST: Actuator command '$cleanCmd' not in allowed actuator set."
+                Log.w(TAG, msg)
+                return DiagnosticCommandResult(
+                    status = CommandStatus.BLOCKED_SAFETY_GUARD,
+                    isSuccess = false,
+                    requestHex = cleanCmd,
+                    statusText = msg
+                )
+            }
+        } else {
+            if (!ALLOWED_READ_COMMANDS_HEX.contains(cleanCmd)) {
+                val msg = "BLOCKED_NOT_IN_WHITELIST: Diagnostic read command '$cleanCmd' not in allowed read whitelist."
+                Log.w(TAG, msg)
+                return DiagnosticCommandResult(
+                    status = CommandStatus.BLOCKED_SAFETY_GUARD,
+                    isSuccess = false,
+                    requestHex = cleanCmd,
+                    statusText = msg
+                )
+            }
+        }
+
+        val kwpResult = sendDiagnosticReadCommand(cleanCmd, timeoutMs.toInt())
+        return mapKwpResultToDiagnosticCommandResult(cleanCmd, kwpResult)
+    }
+
+    private fun mapKwpResultToDiagnosticCommandResult(
+        cleanCmd: String,
+        kwpResult: KwpExchangeResult
+    ): DiagnosticCommandResult {
+        if (kwpResult.isSuccess && kwpResult.kwpFrame != null) {
+            return DiagnosticCommandResult(
+                status = CommandStatus.ACKNOWLEDGED,
+                isSuccess = true,
+                requestHex = cleanCmd,
+                responseHex = kwpResult.payloadHex,
+                statusText = "ACKNOWLEDGED: ${kwpResult.statusText}"
+            )
+        }
+
+        if (kwpResult.statusText.contains("NEGATIVE_RESPONSE") || kwpResult.payloadHex.startsWith("7F")) {
+            val nrc = if (kwpResult.kwpFrame?.payload?.size ?: 0 >= 3) {
+                String.format("%02X", kwpResult.kwpFrame!!.payload[2].toInt() and 0xFF)
+            } else null
+            return DiagnosticCommandResult(
+                status = CommandStatus.NEGATIVE_RESPONSE,
+                isSuccess = false,
+                requestHex = cleanCmd,
+                responseHex = kwpResult.payloadHex,
+                statusText = kwpResult.statusText,
+                nrcCode = nrc
+            )
+        }
+
+        if (kwpResult.statusText.contains("INCOMPLETE_RESPONSE") || kwpResult.statusText.contains("TIMEOUT")) {
+            return DiagnosticCommandResult(
+                status = CommandStatus.TIMEOUT,
+                isSuccess = false,
+                requestHex = cleanCmd,
+                responseHex = kwpResult.payloadHex,
+                statusText = kwpResult.statusText
+            )
+        }
+
+        if (kwpResult.statusText.contains("BLOCKED")) {
+            return DiagnosticCommandResult(
+                status = CommandStatus.BLOCKED_SAFETY_GUARD,
+                isSuccess = false,
+                requestHex = cleanCmd,
+                statusText = kwpResult.statusText
+            )
+        }
+
+        return DiagnosticCommandResult(
+            status = CommandStatus.COMMUNICATION_ERROR,
+            isSuccess = false,
+            requestHex = cleanCmd,
+            responseHex = kwpResult.payloadHex,
+            statusText = kwpResult.statusText
+        )
+    }
+
     fun performFastInit(
         logCallback: ((String) -> Unit)? = null
     ): Boolean {
@@ -230,7 +353,6 @@ class Kwp2000KLineTransport(
         logCallback?.invoke("[FAST INIT] Avvio sequenza Fast Init KWP2000 per ECU Lotus EBC430...")
 
         try {
-            // Idle HIGH > 300ms
             Thread.sleep(320)
 
             val t0Nanos = SystemClock.elapsedRealtimeNanos()
@@ -256,7 +378,7 @@ class Kwp2000KLineTransport(
             logCallback?.invoke(
                 String.format(
                     Locale.US,
-                    "[FAST INIT] Impulsi SOFTWARE misurati: LOW = %.2f ms, HIGH = %.2f ms (I tempi software su USB possono presentare jitter)",
+                    "[FAST INIT] Impulsi SOFTWARE misurati: LOW = %.2f ms, HIGH = %.2f ms",
                     lowDurationMs, highDurationMs
                 )
             )
@@ -294,32 +416,12 @@ class Kwp2000KLineTransport(
         }
     }
 
-    /**
-     * Esegue una richiesta diagnostica con WHITELIST ESPLICITA (1A80 e 2101).
-     * Sicurezza: Blocca qualsiasi altro comando o servizio non autorizzato (es. Servizio 0x30).
-     */
     fun sendDiagnosticReadCommand(
         commandCmdHex: String,
         timeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
         logCallback: ((String) -> Unit)? = null
     ): KwpExchangeResult {
         val cleanCmd = commandCmdHex.replace(" ", "").uppercase(Locale.US)
-
-        if (!ALLOWED_READ_COMMANDS_HEX.contains(cleanCmd)) {
-            val errMsg = "SICUREZZA USB: Il comando '$commandCmdHex' non appartiene alla whitelist approvata (1A80, 2101)."
-            logCallback?.invoke("[SAFETY GUARD] $errMsg")
-            val now = SystemClock.elapsedRealtimeNanos()
-            return KwpExchangeResult(
-                isSuccess = false,
-                statusText = "BLOCKED_NOT_IN_WHITELIST",
-                sentFrameHex = "", echoReceivedHex = "", echoFilteredHex = "", isEchoMatched = false,
-                rawRxHex = "", payloadHex = "",
-                t0Nanos = now, t1Nanos = now, tEchoFirstNanos = now, tEchoCompleteNanos = now,
-                tEcuFirstByteNanos = now, tEcuCompleteNanos = now, t3Nanos = now,
-                writeDurationMs = 0.0, echoDurationMs = 0.0, ecuTimeToFirstByteMs = 0.0,
-                ecuFrameDurationMs = 0.0, totalRoundTripMs = 0.0
-            )
-        }
 
         val payload = cleanCmd.hexToByteArray()
 
@@ -332,10 +434,6 @@ class Kwp2000KLineTransport(
         return sendFrameAndReceive(kwpFrame, timeoutMs)
     }
 
-    /**
-     * Invia un frame KWP2000 e riceve la risposta utilizzando Kwp2000StreamDecoder,
-     * senza mai perdere byte tra echo ed ECU response.
-     */
     fun sendFrameAndReceive(
         frame: Kwp2000Frame,
         timeoutMs: Int
@@ -456,6 +554,10 @@ class Kwp2000KLineTransport(
             totalRoundTripMs = totalRttMs,
             kwpFrame = decodeResult.parsedFrame
         )
+    }
+
+    override suspend fun disconnect() {
+        close()
     }
 
     fun close() {

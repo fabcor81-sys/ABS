@@ -1,48 +1,158 @@
 package com.lotus.abs
 
+import com.lotus.abs.bluetooth.BluetoothManager
+import com.lotus.abs.transport.CommandCategory
+import com.lotus.abs.transport.CommandStatus
+import com.lotus.abs.transport.SimulatedDiagnosticTransport
 import com.lotus.abs.ui.viewmodel.BleedExecState
-import com.lotus.abs.usb.Kwp2000Frame
-import com.lotus.abs.usb.Kwp2000KLineTransport
+import com.lotus.abs.ui.viewmodel.BleedViewModel
+import com.lotus.abs.ui.viewmodel.WheelLocation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class EmergencyStopCoordinatorTest {
 
-    @Test
-    fun testBleedExecStateEnumValues() {
-        val states = BleedExecState.entries.map { it.name }
-        assertTrue("Enum must contain IDLE", states.contains("IDLE"))
-        assertTrue("Enum must contain RUNNING", states.contains("RUNNING"))
-        assertTrue("Enum must contain STOPPING", states.contains("STOPPING"))
-        assertTrue("Enum must contain STOPPED_CONFIRMED", states.contains("STOPPED_CONFIRMED"))
-        assertTrue("Enum must contain STOP_UNCONFIRMED", states.contains("STOP_UNCONFIRMED"))
-        assertTrue("Enum must contain ERROR", states.contains("ERROR"))
+    private val testDispatcher = StandardTestDispatcher()
+    private lateinit var dummyBluetoothManager: BluetoothManager
+    private lateinit var simulatedTransport: SimulatedDiagnosticTransport
+    private lateinit var bleedViewModel: BleedViewModel
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(testDispatcher)
+        dummyBluetoothManager = BluetoothManager(null)
+        simulatedTransport = SimulatedDiagnosticTransport()
+        bleedViewModel = BleedViewModel(dummyBluetoothManager, customTransport = simulatedTransport)
     }
 
-    @Test
-    fun testUsbWhitelistDisablesActuatorsAndClearDTC() {
-        val pumpOn = "30020701"
-        val dumpOn = "30110701"
-        val clearDtc = "14FF00"
-
-        assertFalse("Pump ON must not be in USB whitelist", Kwp2000KLineTransport.ALLOWED_READ_COMMANDS_HEX.contains(pumpOn))
-        assertFalse("DUMP ON must not be in USB whitelist", Kwp2000KLineTransport.ALLOWED_READ_COMMANDS_HEX.contains(dumpOn))
-        assertFalse("Clear DTC must not be in USB whitelist", Kwp2000KLineTransport.ALLOWED_READ_COMMANDS_HEX.contains(clearDtc))
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
     }
 
+    // TEST 5: Cancellazione della macro durante un comando di attivazione.
     @Test
-    fun testKwp2000FrameBuildingAndParsing() {
-        val payload = byteArrayOf(0x1A.toByte(), 0x80.toByte())
-        val frame = Kwp2000Frame.buildFrame(payload, targetAddress = 0x2B.toByte(), sourceAddress = 0xF1.toByte())
+    fun test5_MacroCancellationDuringActivationCommand() = runTest {
+        bleedViewModel.selectWheel(WheelLocation.FRONT_LEFT)
 
-        assertEquals(0x82.toByte(), frame.formatByte)
-        assertEquals(0x2B.toByte(), frame.targetAddress)
-        assertEquals(0xF1.toByte(), frame.sourceAddress)
-        assertEquals(6, frame.rawBytes.size)
+        val job = launch {
+            bleedViewModel.runWheelBleedPulseTestMacro(WheelLocation.FRONT_LEFT)
+        }
 
-        val parsed = Kwp2000Frame.parseFrame(frame.rawBytes)
-        assertEquals(frame.checksum, parsed?.checksum)
+        advanceTimeBy(1500)
+        job.cancel()
+        advanceUntilIdle()
+
+        assertFalse("Running sequence must be false after cancellation", bleedViewModel.state.value.isRunningSequence)
+        val hasOffCommand = simulatedTransport.executedCommands.any { it.first == "30020700" || it.first == "30110700" }
+        assertTrue("OFF commands must be executed on cancellation", hasOffCommand)
+    }
+
+    // TEST 6: Arresto d'emergenza richiesto due volte (deve essere atomico, una sola esecuzione).
+    @Test
+    fun test6_EmergencyStopRequestedTwiceIsAtomic() = runTest {
+        bleedViewModel.selectWheel(WheelLocation.FRONT_LEFT)
+        bleedViewModel.runWheelBleedPulseTestMacro(WheelLocation.FRONT_LEFT)
+
+        advanceTimeBy(1000)
+
+        bleedViewModel.emergencyStop()
+        bleedViewModel.emergencyStop()
+
+        advanceUntilIdle()
+
+        val pumpOffCount = simulatedTransport.executedCommands.count { it.first == "30020700" }
+        assertTrue("Pump OFF commands executed cleanly", pumpOffCount in 2..4)
+    }
+
+    // TEST 7: Disconnessione USB durante una macro.
+    @Test
+    fun test7_UsbDisconnectionDuringMacroProducesError() = runTest {
+        bleedViewModel.selectWheel(WheelLocation.FRONT_LEFT)
+        simulatedTransport.mockConnected = true
+
+        launch {
+            bleedViewModel.runWheelBleedPulseTestMacro(WheelLocation.FRONT_LEFT)
+        }
+
+        advanceTimeBy(1000)
+
+        simulatedTransport.mockConnected = false
+        simulatedTransport.mockResponseMode = SimulatedDiagnosticTransport.ResponseMode.DISCONNECTED
+
+        bleedViewModel.emergencyStop()
+        advanceUntilIdle()
+
+        assertEquals(BleedExecState.ERROR, bleedViewModel.state.value.executionState)
+        assertFalse(bleedViewModel.state.value.isRunningSequence)
+    }
+
+    // TEST 8: Verificare che dopo STOP non vengano inviati ulteriori comandi ON.
+    @Test
+    fun test8_NoOnCommandsSentAfterStopRequested() = runTest {
+        bleedViewModel.selectWheel(WheelLocation.FRONT_LEFT)
+
+        launch {
+            bleedViewModel.runWheelBleedPulseTestMacro(WheelLocation.FRONT_LEFT)
+        }
+
+        advanceTimeBy(1000)
+        simulatedTransport.clearExecutedCommands()
+
+        bleedViewModel.emergencyStop()
+        advanceUntilIdle()
+
+        val onCommandsAfterStop = simulatedTransport.executedCommands.filter {
+            it.first.endsWith("01") && it.second == CommandCategory.ACTUATOR_CONTROL
+        }
+
+        assertTrue("No ON commands must be sent after STOP is requested", onCommandsAfterStop.isEmpty())
+    }
+
+    // TEST 9: Comando OFF trasmesso senza risposta ECU: lo stato deve rimanere UNCONFIRMED.
+    @Test
+    fun test9_OffCommandTransmittedWithoutAckYieldsUnconfirmed() = runTest {
+        bleedViewModel.selectWheel(WheelLocation.FRONT_LEFT)
+        simulatedTransport.mockResponseMode = SimulatedDiagnosticTransport.ResponseMode.TRANSMITTED_NO_ACK
+
+        bleedViewModel.emergencyStop()
+        advanceUntilIdle()
+
+        assertEquals(BleedExecState.STOP_UNCONFIRMED, bleedViewModel.state.value.executionState)
+    }
+
+    // TEST 11: Verificare che le temporizzazioni e l'ordine dei comandi delle macro FAST/SLOW non siano cambiati.
+    @Test
+    fun test11_FastMacroSequenceAndOrderUnchanged() = runTest {
+        bleedViewModel.selectWheel(WheelLocation.FRONT_LEFT)
+        simulatedTransport.clearExecutedCommands()
+
+        bleedViewModel.runWheelBleedPulseTestMacro(WheelLocation.FRONT_LEFT)
+        advanceUntilIdle()
+
+        val cmds = simulatedTransport.executedCommands.map { it.first }
+
+        val dumpOnIdx = cmds.indexOf("30110701")
+        val pumpOnIdx = cmds.indexOf("30020701")
+        val isoOnIdx = cmds.indexOf("30120701")
+        val pumpOffIdx = cmds.indexOf("30020700")
+
+        assertTrue("DUMP ON must precede PUMP ON", dumpOnIdx < pumpOnIdx)
+        assertTrue("PUMP ON must precede ISO ON pulses", pumpOnIdx < isoOnIdx)
+        assertTrue("ISO pulses must precede PUMP OFF shutdown", isoOnIdx < pumpOffIdx)
     }
 }

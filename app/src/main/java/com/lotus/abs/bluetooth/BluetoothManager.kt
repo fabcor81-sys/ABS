@@ -21,6 +21,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.lotus.abs.transport.CommandCategory
+import com.lotus.abs.transport.CommandStatus
+import com.lotus.abs.transport.DiagnosticCommandResult
+import com.lotus.abs.transport.DiagnosticTransport
 import com.lotus.abs.usb.Kwp2000KLineTransport
 import com.lotus.abs.usb.UsbDeviceItem
 import com.lotus.abs.usb.UsbKLineManager
@@ -28,6 +32,7 @@ import com.lotus.abs.util.FileLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -41,17 +46,24 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.Locale
 import java.util.UUID
 import kotlin.coroutines.resume
 
-class BluetoothManager(private val context: Context) {
+open class BluetoothManager(private val context: Context? = null) : DiagnosticTransport {
 
     enum class Transport {
         BLUETOOTH, USB
     }
-    
+
     var activeTransport = Transport.BLUETOOTH
-    private val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+    private val bluetoothAdapter: BluetoothAdapter? by lazy {
+        try {
+            BluetoothAdapter.getDefaultAdapter()
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     // Transport Mutex to serialize diagnostic requests and prevent concurrent access
     val transportMutex = Mutex()
@@ -71,6 +83,12 @@ class BluetoothManager(private val context: Context) {
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
+    override val transportName: String
+        get() = if (activeTransport == Transport.USB) "USB KKL 409.1" else "Bluetooth ELM327"
+
+    override val isConnected: Boolean
+        get() = (_connectionState.value == ConnectionState.CONNECTED)
+
     // Stream received data
     private val _receivedData = MutableSharedFlow<String>(
         replay = 0,
@@ -86,15 +104,16 @@ class BluetoothManager(private val context: Context) {
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning
 
-    private val scanHandler = Handler(Looper.getMainLooper())
+    private val scanHandler by lazy { Handler(Looper.getMainLooper()) }
     private var scanCallback: ScanCallback? = null
 
     private var deviceType: DeviceType = DeviceType.UNKNOWN
     private var listeningActive = false
-    
+
     val usbManager = UsbKLineManager(context)
     var kwpTransport: Kwp2000KLineTransport? = null
     private var usbDetachReceiver: BroadcastReceiver? = null
+    private var currentUsbAddress: String? = null
 
     enum class ConnectionState {
         DISCONNECTED, CONNECTING, CONNECTED, ERROR
@@ -105,8 +124,9 @@ class BluetoothManager(private val context: Context) {
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
-    fun registerUsbDetachReceiver() {
+    fun registerUsbDetachReceiver(connectedAddress: String? = null) {
         if (usbDetachReceiver != null) return
+        currentUsbAddress = connectedAddress
         val filter = IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED)
         usbDetachReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -117,8 +137,14 @@ class BluetoothManager(private val context: Context) {
                         @Suppress("DEPRECATION")
                         intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
                     }
-                    Log.d("BluetoothManager", "USB Device detached event: ${detachedDevice?.deviceName}")
-                    if (activeTransport == Transport.USB) {
+                    val devAddr = if (detachedDevice != null) {
+                        "USB:${String.format("%04X", detachedDevice.vendorId)}:${String.format("%04X", detachedDevice.productId)}:${detachedDevice.deviceId}"
+                    } else null
+
+                    val matches = (currentUsbAddress == null || devAddr == null || devAddr == currentUsbAddress)
+
+                    Log.d("BluetoothManager", "USB Device detached event: ${detachedDevice?.deviceName}, matches=$matches")
+                    if (activeTransport == Transport.USB && matches) {
                         CoroutineScope(Dispatchers.IO).launch {
                             handleUsbDetached()
                         }
@@ -127,9 +153,9 @@ class BluetoothManager(private val context: Context) {
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(usbDetachReceiver, filter, Context.RECEIVER_EXPORTED)
+            context?.registerReceiver(usbDetachReceiver, filter, Context.RECEIVER_EXPORTED)
         } else {
-            context.registerReceiver(usbDetachReceiver, filter)
+            context?.registerReceiver(usbDetachReceiver, filter)
         }
         Log.d("BluetoothManager", "USB Detach receiver registered")
     }
@@ -137,8 +163,9 @@ class BluetoothManager(private val context: Context) {
     fun unregisterUsbDetachReceiver() {
         try {
             usbDetachReceiver?.let {
-                context.unregisterReceiver(it)
+                context?.unregisterReceiver(it)
                 usbDetachReceiver = null
+                currentUsbAddress = null
             }
         } catch (_: Exception) {}
     }
@@ -272,7 +299,7 @@ class BluetoothManager(private val context: Context) {
     suspend fun connectUsbDevice(usbDeviceItem: UsbDeviceItem) {
         activeTransport = Transport.USB
         _connectionState.emit(ConnectionState.CONNECTING)
-        
+
         withContext(Dispatchers.IO) {
             try {
                 val driver = usbManager.findUsbDriverForAddress(usbDeviceItem.address)
@@ -281,14 +308,14 @@ class BluetoothManager(private val context: Context) {
                     _connectionState.emit(ConnectionState.ERROR)
                     return@withContext
                 }
-                
+
                 val port = driver.ports.firstOrNull()
                 if (port == null) {
                     Log.e("BluetoothManager", "USB Port not found")
                     _connectionState.emit(ConnectionState.ERROR)
                     return@withContext
                 }
-                
+
                 val permissionGranted = if (usbManager.hasPermission(driver)) true else
                     suspendCancellableCoroutine<Boolean> { continuation ->
                         usbManager.requestPermission(driver) { granted ->
@@ -308,21 +335,21 @@ class BluetoothManager(private val context: Context) {
                     _connectionState.emit(ConnectionState.ERROR)
                     return@withContext
                 }
-                
+
                 port.open(usbConnection)
-                
+
                 kwpTransport = Kwp2000KLineTransport(port)
                 kwpTransport?.openPort(10400)
-                
+
                 val initSuccess = kwpTransport?.performFastInit { logMsg ->
                     Log.d("BluetoothManager", logMsg)
                     CoroutineScope(Dispatchers.IO).launch {
                         _receivedData.emit("[USB] $logMsg\n")
                     }
                 }
-                
+
                 if (initSuccess == true) {
-                    registerUsbDetachReceiver()
+                    registerUsbDetachReceiver(usbDeviceItem.address)
                     _connectionState.emit(ConnectionState.CONNECTED)
                     Log.d("BluetoothManager", "USB KWP2000 Connected")
                 } else {
@@ -555,74 +582,144 @@ class BluetoothManager(private val context: Context) {
         FileLogger.logTerminal("<", receivedString.trim())
     }
 
-    suspend fun sendCommand(command: String) {
+    override suspend fun executeCommand(
+        commandHex: String,
+        category: CommandCategory,
+        timeoutMs: Long
+    ): DiagnosticCommandResult {
         if (_connectionState.value != ConnectionState.CONNECTED) {
-            FileLogger.w("BluetoothManager", "Cannot send command '$command': Transport not connected.")
-            _receivedData.emit("[SYS] Command rejected: Transport DISCONNECTED\n")
-            return
+            return DiagnosticCommandResult(
+                status = CommandStatus.DISCONNECTED,
+                isSuccess = false,
+                requestHex = commandHex,
+                statusText = "Transport DISCONNECTED"
+            )
         }
 
-        transportMutex.withLock {
+        return transportMutex.withLock {
             withContext(Dispatchers.IO) {
-                try {
-                    if (activeTransport == Transport.USB) {
-                        val result = kwpTransport?.sendDiagnosticReadCommand(command) { logMsg ->
-                            Log.d("BluetoothManager", logMsg)
-                            CoroutineScope(Dispatchers.IO).launch {
-                                _receivedData.emit("[USB] $logMsg\n")
-                            }
-                        }
-                        if (result != null && result.isSuccess) {
-                            _receivedData.emit(result.payloadHex + "\n")
-                        } else {
-                            _receivedData.emit("[USB] ${result?.statusText ?: "NOT_CONNECTED"}\n")
-                        }
-                        return@withContext
-                    }
-
-                    when (deviceType) {
-                        DeviceType.CLASSIC -> sendCommandClassic(command)
-                        DeviceType.BLE -> sendCommandBLE(command)
-                        else -> {
-                            FileLogger.w("BluetoothManager", "Unknown device type for sending, attempting Classic SPP then BLE")
-                            try {
-                                sendCommandClassic(command)
-                            } catch (e: Exception) {
-                                sendCommandBLE(command)
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    FileLogger.e("BluetoothManager", "Send failed: ${e.message}", e)
-                    _connectionState.emit(ConnectionState.ERROR)
+                if (activeTransport == Transport.USB) {
+                    return@withContext kwpTransport?.executeCommand(commandHex, category, timeoutMs)
+                        ?: DiagnosticCommandResult(
+                            status = CommandStatus.DISCONNECTED,
+                            isSuccess = false,
+                            requestHex = commandHex,
+                            statusText = "USB Transport is null"
+                        )
+                } else {
+                    return@withContext executeBluetoothCommandStructured(commandHex, category, timeoutMs)
                 }
             }
         }
     }
 
-    suspend fun sendCommandConfirmed(command: String): Boolean {
-        if (_connectionState.value != ConnectionState.CONNECTED) return false
+    private suspend fun executeBluetoothCommandStructured(
+        commandHex: String,
+        category: CommandCategory,
+        timeoutMs: Long
+    ): DiagnosticCommandResult {
+        val cleanCmd = commandHex.replace(" ", "").uppercase(Locale.US)
+        val serviceByteHex = if (cleanCmd.length >= 2) cleanCmd.substring(0, 2) else ""
+        val expectedPosServiceHex = try {
+            String.format("%02X", (serviceByteHex.toInt(16) + 0x40) and 0xFF)
+        } catch (_: Exception) { "" }
 
-        return transportMutex.withLock {
-            withContext(Dispatchers.IO) {
-                try {
-                    if (activeTransport == Transport.USB) {
-                        val result = kwpTransport?.sendDiagnosticReadCommand(command)
-                        return@withContext (result != null && result.isSuccess)
-                    } else {
-                        when (deviceType) {
-                            DeviceType.CLASSIC -> sendCommandClassic(command)
-                            DeviceType.BLE -> sendCommandBLE(command)
-                            else -> sendCommandClassic(command)
-                        }
-                        return@withContext (bluetoothSocket?.isConnected == true || bluetoothGatt != null)
-                    }
-                } catch (e: Exception) {
-                    FileLogger.e("BluetoothManager", "Confirmed send failed: ${e.message}", e)
-                    return@withContext false
-                }
+        var responsePayload = ""
+        var commandTransmitted = false
+
+        val job = CoroutineScope(Dispatchers.IO).launch {
+            receivedData.collect { data ->
+                responsePayload += data.replace("\r", "")
             }
         }
+
+        try {
+            when (deviceType) {
+                DeviceType.CLASSIC -> sendCommandClassic(commandHex)
+                DeviceType.BLE -> sendCommandBLE(commandHex)
+                else -> sendCommandClassic(commandHex)
+            }
+            commandTransmitted = true
+        } catch (e: Exception) {
+            job.cancel()
+            return DiagnosticCommandResult(
+                status = CommandStatus.COMMUNICATION_ERROR,
+                isSuccess = false,
+                requestHex = cleanCmd,
+                statusText = "Write error: ${e.message}"
+            )
+        }
+
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            if (responsePayload.contains("\n") || responsePayload.contains(">")) {
+                val lines = responsePayload.split("\n", "\r", ">").map { it.trim().replace(" ", "").uppercase(Locale.US) }
+                for (line in lines) {
+                    if (expectedPosServiceHex.isNotEmpty() && line.contains(expectedPosServiceHex)) {
+                        job.cancel()
+                        return DiagnosticCommandResult(
+                            status = CommandStatus.ACKNOWLEDGED,
+                            isSuccess = true,
+                            requestHex = cleanCmd,
+                            responseHex = line,
+                            statusText = "ACKNOWLEDGED: ECU returned positive response $line"
+                        )
+                    }
+                    if (line.startsWith("7F") || line.contains("7F${serviceByteHex}")) {
+                        job.cancel()
+                        val nrc = if (line.length >= 6) line.substring(4, 6) else null
+                        return DiagnosticCommandResult(
+                            status = CommandStatus.NEGATIVE_RESPONSE,
+                            isSuccess = false,
+                            requestHex = cleanCmd,
+                            responseHex = line,
+                            statusText = "NEGATIVE_RESPONSE: ECU returned NRC $line",
+                            nrcCode = nrc
+                        )
+                    }
+                    if (line.contains("NODATA") || line.contains("CANERROR") || line.contains("BUSERROR")) {
+                        job.cancel()
+                        return DiagnosticCommandResult(
+                            status = CommandStatus.COMMUNICATION_ERROR,
+                            isSuccess = false,
+                            requestHex = cleanCmd,
+                            statusText = "ELM327 error: $line"
+                        )
+                    }
+                }
+            }
+            delay(50)
+        }
+
+        job.cancel()
+
+        if (commandTransmitted) {
+            return DiagnosticCommandResult(
+                status = CommandStatus.TRANSMITTED,
+                isSuccess = false,
+                requestHex = cleanCmd,
+                statusText = "TRANSMITTED: Command written over Bluetooth, but no positive ECU ACK received"
+            )
+        }
+
+        return DiagnosticCommandResult(
+            status = CommandStatus.TIMEOUT,
+            isSuccess = false,
+            requestHex = cleanCmd,
+            statusText = "TIMEOUT: No response within ${timeoutMs}ms"
+        )
+    }
+
+    suspend fun sendCommand(command: String) {
+        executeCommand(command, CommandCategory.READ_ONLY)
+    }
+
+    suspend fun sendCommandConfirmed(
+        command: String,
+        category: CommandCategory = CommandCategory.ACTUATOR_CONTROL,
+        timeoutMs: Long = 1500
+    ): DiagnosticCommandResult {
+        return executeCommand(command, category, timeoutMs)
     }
 
     private suspend fun sendCommandClassic(command: String) {
@@ -697,13 +794,13 @@ class BluetoothManager(private val context: Context) {
         }
     }
 
-    suspend fun disconnect() {
+    override suspend fun disconnect() {
         stopScan()
         unregisterUsbDetachReceiver()
         withContext(Dispatchers.IO) {
             try {
                 listeningActive = false
-                
+
                 if (activeTransport == Transport.USB) {
                     kwpTransport?.close()
                     kwpTransport = null
