@@ -34,6 +34,8 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 class BluetoothManager(private val context: Context) {
 
@@ -227,6 +229,19 @@ class BluetoothManager(private val context: Context) {
                     return@withContext
                 }
                 
+                val permissionGranted = if (usbManager.hasPermission(driver)) true else
+                    suspendCancellableCoroutine<Boolean> { continuation ->
+                        usbManager.requestPermission(driver) { granted ->
+                            if (continuation.isActive) continuation.resume(granted)
+                        }
+                        continuation.invokeOnCancellation { usbManager.unregisterReceiver() }
+                    }
+                if (!permissionGranted) {
+                    Log.e("BluetoothManager", "USB permission denied")
+                    _connectionState.emit(ConnectionState.ERROR)
+                    return@withContext
+                }
+
                 val usbConnection = usbManager.usbManager?.openDevice(driver.device)
                 if (usbConnection == null) {
                     Log.e("BluetoothManager", "Cannot open USB device. Permissions?")
@@ -242,7 +257,7 @@ class BluetoothManager(private val context: Context) {
                 val initSuccess = kwpTransport?.performFastInit { logMsg ->
                     Log.d("BluetoothManager", logMsg)
                     CoroutineScope(Dispatchers.IO).launch {
-                        _receivedData.emit("[USB] $logMsg")
+                        _receivedData.emit("[USB] $logMsg\n")
                     }
                 }
                 
@@ -254,6 +269,8 @@ class BluetoothManager(private val context: Context) {
                     _connectionState.emit(ConnectionState.ERROR)
                 }
             } catch (e: Exception) {
+                kwpTransport?.close()
+                kwpTransport = null
                 Log.e("BluetoothManager", "USB connection failed: ${e.message}")
                 _connectionState.emit(ConnectionState.ERROR)
             }
@@ -490,13 +507,13 @@ class BluetoothManager(private val context: Context) {
                     val result = kwpTransport?.sendDiagnosticReadCommand(command) { logMsg ->
                         Log.d("BluetoothManager", logMsg)
                         CoroutineScope(Dispatchers.IO).launch {
-                            _receivedData.emit("[USB] $logMsg")
+                            _receivedData.emit("[USB] $logMsg\n")
                         }
                     }
                     if (result != null && result.isSuccess) {
-                        _receivedData.emit(result.payloadHex)
+                        _receivedData.emit(result.payloadHex + "\n")
                     } else {
-                        _receivedData.emit("ERROR")
+                        _receivedData.emit("[USB] ${result?.statusText ?: "NOT_CONNECTED"}\n")
                     }
                     return@withContext
                 }

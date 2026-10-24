@@ -153,9 +153,7 @@ class BleedViewModel(
         bluetoothManager.sendCommand("AT SP 5")
         delay(200)
 
-        addSystemLog("Init 8/8: Clearing DTCs (14 FF 00)")
-        addSentLog("14 FF 00")
-        bluetoothManager.sendCommand("14 FF 00")
+        addSystemLog("Init 8/8: DTC retained (automatic clearing disabled)")
         delay(500)
     }
 
@@ -183,9 +181,7 @@ class BleedViewModel(
         bluetoothManager.sendCommand("AT SP 5")
         delay(100)
 
-        addSystemLog("Slow Init 5/5: Clearing DTCs (14 FF 00)")
-        addSentLog("14 FF 00")
-        bluetoothManager.sendCommand("14 FF 00")
+        addSystemLog("Slow Init 5/5: DTC retained (automatic clearing disabled)")
         delay(2000)
     }
 
@@ -312,6 +308,10 @@ class BleedViewModel(
     }
 
     fun runWheelBleedPulseTestMacro(wheel: WheelLocation) {
+        if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB) {
+            addSystemLog("USB is read-only: actuator commands are disabled.")
+            return
+        }
         if (_state.value.isRunningSequence) return
 
         activeJob = viewModelScope.launch {
@@ -323,6 +323,8 @@ class BleedViewModel(
                 )
             }
 
+            var completedNormally = false
+            try {
             addSystemLog("--- Starting Fast Hydraulic Pulse Test Macro for ${wheel.title} (${wheel.shortName}) ---")
 
             executeSafeFastElm327Init()
@@ -389,10 +391,26 @@ class BleedViewModel(
                     isRunningSequence = false
                 )
             }
+                completedNormally = true
+            } finally {
+                if (!completedNormally) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                        addSystemLog("Sequence interrupted: attempting actuator OFF commands; verify ECU responses before use.")
+                        bluetoothManager.sendCommand("30 02 07 00")
+                        bluetoothManager.sendCommand(wheel.dumpOffCommand)
+                        bluetoothManager.sendCommand(wheel.isoOffCommand)
+                        _state.update { it.copy(activeOperation = null, timeRemainingSec = 0, isRunningSequence = false) }
+                    }
+                }
+            }
         }
     }
 
     fun runWheelBleedPulseTestMacroSlow(wheel: WheelLocation) {
+        if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB) {
+            addSystemLog("USB is read-only: actuator commands are disabled.")
+            return
+        }
         if (_state.value.isRunningSequence) return
 
         activeJob = viewModelScope.launch {
@@ -404,6 +422,8 @@ class BleedViewModel(
                 )
             }
 
+            var completedNormally = false
+            try {
             addSystemLog("--- Starting Slow Hydraulic Pulse Test Macro for ${wheel.title} (${wheel.shortName}) ---")
 
             executeSlowElm327Init()
@@ -470,15 +490,31 @@ class BleedViewModel(
                     isRunningSequence = false
                 )
             }
+                completedNormally = true
+            } finally {
+                if (!completedNormally) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                        addSystemLog("Sequence interrupted: attempting actuator OFF commands; verify ECU responses before use.")
+                        bluetoothManager.sendCommand("30 02 07 00")
+                        bluetoothManager.sendCommand(wheel.dumpOffCommand)
+                        bluetoothManager.sendCommand(wheel.isoOffCommand)
+                        _state.update { it.copy(activeOperation = null, timeRemainingSec = 0, isRunningSequence = false) }
+                    }
+                }
+            }
         }
     }
 
     fun runBleedSequence(name: String, onCommand: String, offCommand: String, durationSec: Int) {
+        if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB) {
+            addSystemLog("USB is read-only: actuator commands are disabled.")
+            return
+        }
         if (_state.value.isRunningSequence) return
 
-        viewModelScope.launch {
+        activeJob = viewModelScope.launch {
             try {
-                _state.update { it.copy(activeOperation = name, timeRemainingSec = durationSec) }
+                _state.update { it.copy(activeOperation = name, timeRemainingSec = durationSec, isRunningSequence = true) }
                 addSystemLog("Starting $name sequence...")
 
                 addSentLog(onCommand)
@@ -511,7 +547,7 @@ class BleedViewModel(
                     bluetoothManager.sendCommand("30 03 07 00")
                     
                     addSystemLog("Finished $name sequence.")
-                    _state.update { it.copy(activeOperation = null, timeRemainingSec = 0) }
+                    _state.update { it.copy(activeOperation = null, timeRemainingSec = 0, isRunningSequence = false) }
                 }
             }
         }
@@ -551,7 +587,7 @@ class BleedViewModel(
             addSentLog("30 02 07 00")
             bluetoothManager.sendCommand("30 02 07 00")
 
-            addSystemLog("All systems shutdown safely.")
+            addSystemLog("OFF commands sent; ECU actuator state is NOT independently confirmed.")
             _state.update {
                 it.copy(
                     activeOperation = null,

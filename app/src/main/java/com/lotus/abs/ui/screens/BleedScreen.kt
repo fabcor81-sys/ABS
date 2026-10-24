@@ -30,9 +30,21 @@ import com.lotus.abs.ui.viewmodel.BleedViewModel
 import com.lotus.abs.ui.viewmodel.WheelLocation
 
 @Composable
-fun BleedScreen(viewModel: BleedViewModel) {
+fun BleedScreen(viewModel: BleedViewModel, isSlowMode: Boolean = false) {
     val state by viewModel.state.collectAsState()
     val terminalListState = rememberLazyListState()
+
+    val selectedWheel = state.selectedWheel
+    if (selectedWheel != null) {
+        WheelDetailScreen(
+            viewModel = viewModel,
+            wheel = selectedWheel,
+            onBack = { viewModel.selectWheel(null) },
+            isTestMode = true,
+            isSlowMode = isSlowMode
+        )
+        return
+    }
 
     LaunchedEffect(state.terminalLog) {
         if (state.terminalLog.isNotEmpty()) {

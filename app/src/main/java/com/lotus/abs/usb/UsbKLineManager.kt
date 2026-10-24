@@ -78,7 +78,7 @@ class UsbKLineManager(private val context: Context) {
             val dev = driver.device
             val devAddr = "USB:${String.format("%04X", dev.vendorId)}:${String.format("%04X", dev.productId)}:${dev.deviceId}"
             devAddr == address
-        } ?: availableDrivers.firstOrNull()
+        }
     }
 
     fun hasPermission(driver: UsbSerialDriver): Boolean {
