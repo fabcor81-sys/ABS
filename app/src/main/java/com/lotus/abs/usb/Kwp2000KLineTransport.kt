@@ -175,8 +175,12 @@ class Kwp2000KLineTransport(
         private const val TAG = "KWP2000_KLINE"
         const val DEFAULT_READ_TIMEOUT_MS = 1500
 
-        // CORREZIONE 4 - Whitelist di sicurezza esplicita dei soli comandi read-only approvati per la EBC430
-        val ALLOWED_READ_COMMANDS_HEX = setOf("1A80", "2101", "2102")
+        // Whitelist di sicurezza esplicita dei soli comandi di lettura diagnostica approvati per la EBC430 su USB KKL
+        val ALLOWED_READ_COMMANDS_HEX = setOf(
+            "1A80", "1A91", "1A92", "1A94",
+            "2101", "2102",
+            "2130", "2131", "2132", "2133", "2134"
+        )
     }
 
     private val streamDecoder by lazy {

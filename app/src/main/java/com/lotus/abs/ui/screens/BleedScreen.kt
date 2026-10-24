@@ -67,10 +67,11 @@ fun BleedScreen(viewModel: BleedViewModel, isSlowMode: Boolean = false) {
         )
 
         // Active operation banner with Emergency Stop
-        if (state.activeOperation != null) {
+        if (state.activeOperation != null || state.executionState == com.lotus.abs.ui.viewmodel.BleedExecState.STOPPING || state.executionState == com.lotus.abs.ui.viewmodel.BleedExecState.STOP_UNCONFIRMED) {
             EmergencyActiveBanner(
-                activeOperation = state.activeOperation!!,
+                activeOperation = state.activeOperation ?: "Arresto in corso...",
                 timeRemainingSec = state.timeRemainingSec,
+                executionState = state.executionState,
                 onEmergencyStop = { viewModel.emergencyStop() }
             )
         }
@@ -275,10 +276,11 @@ fun WheelDetailScreen(
         }
 
         // Active Operation & Emergency Stop Banner
-        if (state.activeOperation != null) {
+        if (state.activeOperation != null || state.executionState == com.lotus.abs.ui.viewmodel.BleedExecState.STOPPING || state.executionState == com.lotus.abs.ui.viewmodel.BleedExecState.STOP_UNCONFIRMED) {
             EmergencyActiveBanner(
-                activeOperation = state.activeOperation!!,
+                activeOperation = state.activeOperation ?: "Arresto in corso...",
                 timeRemainingSec = state.timeRemainingSec,
+                executionState = state.executionState,
                 onEmergencyStop = { viewModel.emergencyStop() }
             )
         }
@@ -451,6 +453,7 @@ fun WheelDetailScreen(
 fun EmergencyActiveBanner(
     activeOperation: String,
     timeRemainingSec: Int,
+    executionState: com.lotus.abs.ui.viewmodel.BleedExecState = com.lotus.abs.ui.viewmodel.BleedExecState.IDLE,
     onEmergencyStop: () -> Unit
 ) {
     Card(
@@ -469,7 +472,12 @@ fun EmergencyActiveBanner(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "OPERAZIONE IN CORSO",
+                    when (executionState) {
+                        com.lotus.abs.ui.viewmodel.BleedExecState.STOPPING -> "ARRESTO EMERGENZA IN CORSO..."
+                        com.lotus.abs.ui.viewmodel.BleedExecState.STOP_UNCONFIRMED -> "⚠️ ARRESTO NON CONFERMATO DA ECU"
+                        com.lotus.abs.ui.viewmodel.BleedExecState.ERROR -> "⚠️ ERRORE TRASPORTO / SCOLLEGATO"
+                        else -> "OPERAZIONE IN CORSO"
+                    },
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold

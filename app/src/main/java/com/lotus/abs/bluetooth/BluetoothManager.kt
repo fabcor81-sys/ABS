@@ -1,5 +1,6 @@
 package com.lotus.abs.bluetooth
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
@@ -10,7 +11,12 @@ import android.bluetooth.BluetoothSocket
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -19,6 +25,7 @@ import com.lotus.abs.usb.Kwp2000KLineTransport
 import com.lotus.abs.usb.UsbDeviceItem
 import com.lotus.abs.usb.UsbKLineManager
 import com.lotus.abs.util.FileLogger
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -26,15 +33,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
 class BluetoothManager(private val context: Context) {
@@ -45,6 +52,9 @@ class BluetoothManager(private val context: Context) {
     
     var activeTransport = Transport.BLUETOOTH
     private val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+
+    // Transport Mutex to serialize diagnostic requests and prevent concurrent access
+    val transportMutex = Mutex()
 
     // Classic Bluetooth
     private var bluetoothSocket: BluetoothSocket? = null
@@ -84,6 +94,7 @@ class BluetoothManager(private val context: Context) {
     
     val usbManager = UsbKLineManager(context)
     var kwpTransport: Kwp2000KLineTransport? = null
+    private var usbDetachReceiver: BroadcastReceiver? = null
 
     enum class ConnectionState {
         DISCONNECTED, CONNECTING, CONNECTED, ERROR
@@ -91,6 +102,55 @@ class BluetoothManager(private val context: Context) {
 
     enum class DeviceType {
         CLASSIC, BLE, UNKNOWN
+    }
+
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    fun registerUsbDetachReceiver() {
+        if (usbDetachReceiver != null) return
+        val filter = IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        usbDetachReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (UsbManager.ACTION_USB_DEVICE_DETACHED == intent?.action) {
+                    val detachedDevice: UsbDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                    }
+                    Log.d("BluetoothManager", "USB Device detached event: ${detachedDevice?.deviceName}")
+                    if (activeTransport == Transport.USB) {
+                        CoroutineScope(Dispatchers.IO).launch {
+                            handleUsbDetached()
+                        }
+                    }
+                }
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(usbDetachReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            context.registerReceiver(usbDetachReceiver, filter)
+        }
+        Log.d("BluetoothManager", "USB Detach receiver registered")
+    }
+
+    fun unregisterUsbDetachReceiver() {
+        try {
+            usbDetachReceiver?.let {
+                context.unregisterReceiver(it)
+                usbDetachReceiver = null
+            }
+        } catch (_: Exception) {}
+    }
+
+    suspend fun handleUsbDetached() {
+        FileLogger.w("BluetoothManager", "USB device detached physically. Cleaning transport.")
+        withContext(Dispatchers.IO) {
+            kwpTransport?.close()
+            kwpTransport = null
+            _connectionState.emit(ConnectionState.DISCONNECTED)
+            _receivedData.emit("[USB] USB DISCONNECTED: Cavo o adattatore rimosso.\n")
+        }
     }
 
     fun startScan(scanDurationMs: Long = 10000) {
@@ -262,6 +322,7 @@ class BluetoothManager(private val context: Context) {
                 }
                 
                 if (initSuccess == true) {
+                    registerUsbDetachReceiver()
                     _connectionState.emit(ConnectionState.CONNECTED)
                     Log.d("BluetoothManager", "USB KWP2000 Connected")
                 } else {
@@ -368,7 +429,6 @@ class BluetoothManager(private val context: Context) {
                 }
             }
 
-            // Android 13+ (API 33+)
             override fun onCharacteristicChanged(
                 gatt: BluetoothGatt,
                 characteristic: BluetoothGattCharacteristic,
@@ -377,7 +437,6 @@ class BluetoothManager(private val context: Context) {
                 handleReceivedBytes(value)
             }
 
-            // Pre-Android 13 (API < 33)
             @Deprecated("Deprecated in Java", ReplaceWith("onCharacteristicChanged(gatt, characteristic, value)"))
             override fun onCharacteristicChanged(
                 gatt: BluetoothGatt?,
@@ -409,9 +468,7 @@ class BluetoothManager(private val context: Context) {
         notifyCharacteristic = null
         val cccdUUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
-        // Generic Fallback: Search across all services
         for (service in gatt.services) {
-            // Ignore generic access / attribute profiles
             if (service.uuid.toString().startsWith("0000180")) continue
 
             var foundWrite: BluetoothGattCharacteristic? = null
@@ -426,7 +483,6 @@ class BluetoothManager(private val context: Context) {
                 if (isWritable && foundWrite == null) {
                     foundWrite = chara
                 }
-                // Only consider it a notify characteristic if it actually has the CCCD descriptor
                 if (isNotifiable && hasCCCD && foundNotify == null) {
                     foundNotify = chara
                 }
@@ -441,7 +497,6 @@ class BluetoothManager(private val context: Context) {
             }
         }
 
-        // If we found a write char but no separate notify char with a CCCD, maybe it's the same characteristic
         if (writeCharacteristic != null && notifyCharacteristic == null) {
             val hasCCCD = writeCharacteristic!!.getDescriptor(cccdUUID) != null
             if (hasCCCD) {
@@ -501,38 +556,71 @@ class BluetoothManager(private val context: Context) {
     }
 
     suspend fun sendCommand(command: String) {
-        withContext(Dispatchers.IO) {
-            try {
-                if (activeTransport == Transport.USB) {
-                    val result = kwpTransport?.sendDiagnosticReadCommand(command) { logMsg ->
-                        Log.d("BluetoothManager", logMsg)
-                        CoroutineScope(Dispatchers.IO).launch {
-                            _receivedData.emit("[USB] $logMsg\n")
-                        }
-                    }
-                    if (result != null && result.isSuccess) {
-                        _receivedData.emit(result.payloadHex + "\n")
-                    } else {
-                        _receivedData.emit("[USB] ${result?.statusText ?: "NOT_CONNECTED"}\n")
-                    }
-                    return@withContext
-                }
+        if (_connectionState.value != ConnectionState.CONNECTED) {
+            FileLogger.w("BluetoothManager", "Cannot send command '$command': Transport not connected.")
+            _receivedData.emit("[SYS] Command rejected: Transport DISCONNECTED\n")
+            return
+        }
 
-                when (deviceType) {
-                    DeviceType.CLASSIC -> sendCommandClassic(command)
-                    DeviceType.BLE -> sendCommandBLE(command)
-                    else -> {
-                        FileLogger.w("BluetoothManager", "Unknown device type for sending, attempting Classic SPP then BLE")
-                        try {
-                            sendCommandClassic(command)
-                        } catch (e: Exception) {
-                            sendCommandBLE(command)
+        transportMutex.withLock {
+            withContext(Dispatchers.IO) {
+                try {
+                    if (activeTransport == Transport.USB) {
+                        val result = kwpTransport?.sendDiagnosticReadCommand(command) { logMsg ->
+                            Log.d("BluetoothManager", logMsg)
+                            CoroutineScope(Dispatchers.IO).launch {
+                                _receivedData.emit("[USB] $logMsg\n")
+                            }
+                        }
+                        if (result != null && result.isSuccess) {
+                            _receivedData.emit(result.payloadHex + "\n")
+                        } else {
+                            _receivedData.emit("[USB] ${result?.statusText ?: "NOT_CONNECTED"}\n")
+                        }
+                        return@withContext
+                    }
+
+                    when (deviceType) {
+                        DeviceType.CLASSIC -> sendCommandClassic(command)
+                        DeviceType.BLE -> sendCommandBLE(command)
+                        else -> {
+                            FileLogger.w("BluetoothManager", "Unknown device type for sending, attempting Classic SPP then BLE")
+                            try {
+                                sendCommandClassic(command)
+                            } catch (e: Exception) {
+                                sendCommandBLE(command)
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    FileLogger.e("BluetoothManager", "Send failed: ${e.message}", e)
+                    _connectionState.emit(ConnectionState.ERROR)
                 }
-            } catch (e: Exception) {
-                FileLogger.e("BluetoothManager", "Send failed: ${e.message}", e)
-                _connectionState.emit(ConnectionState.ERROR)
+            }
+        }
+    }
+
+    suspend fun sendCommandConfirmed(command: String): Boolean {
+        if (_connectionState.value != ConnectionState.CONNECTED) return false
+
+        return transportMutex.withLock {
+            withContext(Dispatchers.IO) {
+                try {
+                    if (activeTransport == Transport.USB) {
+                        val result = kwpTransport?.sendDiagnosticReadCommand(command)
+                        return@withContext (result != null && result.isSuccess)
+                    } else {
+                        when (deviceType) {
+                            DeviceType.CLASSIC -> sendCommandClassic(command)
+                            DeviceType.BLE -> sendCommandBLE(command)
+                            else -> sendCommandClassic(command)
+                        }
+                        return@withContext (bluetoothSocket?.isConnected == true || bluetoothGatt != null)
+                    }
+                } catch (e: Exception) {
+                    FileLogger.e("BluetoothManager", "Confirmed send failed: ${e.message}", e)
+                    return@withContext false
+                }
             }
         }
     }
@@ -611,6 +699,7 @@ class BluetoothManager(private val context: Context) {
 
     suspend fun disconnect() {
         stopScan()
+        unregisterUsbDetachReceiver()
         withContext(Dispatchers.IO) {
             try {
                 listeningActive = false

@@ -4,11 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lotus.abs.bluetooth.BluetoothManager
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 
 enum class WheelLocation(
     val id: String,
@@ -63,12 +68,22 @@ enum class WheelLocation(
     }
 }
 
+enum class BleedExecState {
+    IDLE,
+    RUNNING,
+    STOPPING,
+    STOPPED_CONFIRMED,
+    STOP_UNCONFIRMED,
+    ERROR
+}
+
 data class BleedState(
     val selectedWheel: WheelLocation? = null,
     val terminalLog: List<TerminalEntry> = emptyList(),
     val activeOperation: String? = null,
     val timeRemainingSec: Int = 0,
-    val isRunningSequence: Boolean = false
+    val isRunningSequence: Boolean = false,
+    val executionState: BleedExecState = BleedExecState.IDLE
 )
 
 class BleedViewModel(
@@ -78,6 +93,7 @@ class BleedViewModel(
     val state: StateFlow<BleedState> = _state
 
     private var activeJob: Job? = null
+    private val stopMutex = Mutex()
 
     init {
         observeBluetoothData()
@@ -114,9 +130,6 @@ class BleedViewModel(
         _state.update { it.copy(selectedWheel = wheel) }
     }
 
-    /**
-     * Reliable Fast ELM327 Initialization (~2.5s total)
-     */
     private suspend fun executeSafeFastElm327Init() {
         addSystemLog("Init 1/8: Resetting ELM327 (ATZ)")
         addSentLog("ATZ")
@@ -157,9 +170,6 @@ class BleedViewModel(
         delay(500)
     }
 
-    /**
-     * Original Relaxed/Slow ELM327 Initialization (~11s total with 3s delays)
-     */
     private suspend fun executeSlowElm327Init() {
         addSystemLog("Slow Init 1/5: Resetting ELM327 (ATZ)")
         addSentLog("ATZ")
@@ -185,124 +195,253 @@ class BleedViewModel(
         delay(2000)
     }
 
+    /**
+     * Single Coordinated Emergency Stop Execution.
+     * Guaranteed to run only once per stop request via Mutex.
+     */
+    suspend fun executeCoordinatedStop(wheel: WheelLocation?) {
+        if (stopMutex.isLocked) return
+        stopMutex.withLock {
+            _state.update {
+                it.copy(
+                    activeOperation = "ARRESTO IN CORSO...",
+                    executionState = BleedExecState.STOPPING
+                )
+            }
+
+            withContext(NonCancellable) {
+                addSystemLog("🛑 EXECUTING COORDINATED EMERGENCY SHUTDOWN...")
+
+                var allConfirmed = true
+
+                // 1. Send Pump OFF
+                addSystemLog("Shutdown Step 1/4: Shutting down ABS Pump (30 02 07 00)...")
+                addSentLog("30 02 07 00")
+                val pumpOk = bluetoothManager.sendCommandConfirmed("30 02 07 00")
+                if (!pumpOk) allConfirmed = false
+                delay(200)
+
+                // 2. Send DUMP and ISO OFF
+                if (wheel != null) {
+                    addSystemLog("Shutdown Step 2/4: Closing DUMP valve (${wheel.dumpOffCommand})...")
+                    addSentLog(wheel.dumpOffCommand)
+                    val dumpOk = bluetoothManager.sendCommandConfirmed(wheel.dumpOffCommand)
+                    if (!dumpOk) allConfirmed = false
+                    delay(200)
+
+                    addSystemLog("Shutdown Step 3/4: Closing ISO valve (${wheel.isoOffCommand})...")
+                    addSentLog(wheel.isoOffCommand)
+                    val isoOk = bluetoothManager.sendCommandConfirmed(wheel.isoOffCommand)
+                    if (!isoOk) allConfirmed = false
+                    delay(200)
+                } else {
+                    val closeCmds = listOf("30 11 07 00", "30 21 07 00", "30 31 07 00", "30 41 07 00")
+                    for (cmd in closeCmds) {
+                        addSentLog(cmd)
+                        val ok = bluetoothManager.sendCommandConfirmed(cmd)
+                        if (!ok) allConfirmed = false
+                        delay(100)
+                    }
+                }
+
+                // 3. Confirm Pump OFF
+                addSystemLog("Shutdown Step 4/4: Confirming Pump OFF (30 02 07 00)...")
+                addSentLog("30 02 07 00")
+                val doubleCheckOk = bluetoothManager.sendCommandConfirmed("30 02 07 00")
+                if (!doubleCheckOk) allConfirmed = false
+
+                val isConnected = bluetoothManager.connectionState.value == BluetoothManager.ConnectionState.CONNECTED
+
+                if (isConnected && allConfirmed) {
+                    _state.update {
+                        it.copy(
+                            activeOperation = null,
+                            timeRemainingSec = 0,
+                            isRunningSequence = false,
+                            executionState = BleedExecState.STOPPED_CONFIRMED
+                        )
+                    }
+                    addSystemLog("✅ EMERGENCY STOP COMPLETE: Actuator shutdown CONFIRMED by ECU.")
+                } else {
+                    _state.update {
+                        it.copy(
+                            activeOperation = null,
+                            timeRemainingSec = 0,
+                            isRunningSequence = false,
+                            executionState = if (isConnected) BleedExecState.STOP_UNCONFIRMED else BleedExecState.ERROR
+                        )
+                    }
+                    if (!isConnected) {
+                        addSystemLog("⚠️ EMERGENCY STOP INCOMPLETE: Transport DISCONNECTED during shutdown procedure.")
+                    } else {
+                        addSystemLog("⚠️ EMERGENCY STOP UNCONFIRMED: ECU did not return positive acknowledgment for all OFF commands.")
+                    }
+                }
+            }
+        }
+    }
+
+    fun emergencyStop() {
+        val currentWheel = _state.value.selectedWheel
+        _state.update {
+            it.copy(
+                activeOperation = "ARRESTO IN CORSO...",
+                executionState = BleedExecState.STOPPING
+            )
+        }
+
+        activeJob?.cancel()
+        activeJob = null
+
+        viewModelScope.launch {
+            executeCoordinatedStop(currentWheel)
+        }
+    }
+
     fun runWheelBleedMacro(wheel: WheelLocation) {
-        if (_state.value.isRunningSequence) return
+        if (_state.value.isRunningSequence || _state.value.executionState == BleedExecState.STOPPING) return
 
         activeJob = viewModelScope.launch {
             _state.update {
                 it.copy(
                     activeOperation = "Macro Spurgo (${wheel.shortName})",
                     timeRemainingSec = 13,
-                    isRunningSequence = true
+                    isRunningSequence = true,
+                    executionState = BleedExecState.RUNNING
                 )
             }
 
-            addSystemLog("--- Starting Fast Bleed Sequence for ${wheel.title} (${wheel.shortName}) ---")
+            var completedNormally = false
+            try {
+                addSystemLog("--- Starting Fast Bleed Sequence for ${wheel.title} (${wheel.shortName}) ---")
 
-            executeSafeFastElm327Init()
+                executeSafeFastElm327Init()
 
-            // Open DUMP Valve (5s)
-            addSystemLog("Opening DUMP valve (${wheel.dumpOnCommand})")
-            addSentLog(wheel.dumpOnCommand)
-            bluetoothManager.sendCommand(wheel.dumpOnCommand)
+                // Open DUMP Valve (5s)
+                addSystemLog("Opening DUMP valve (${wheel.dumpOnCommand})")
+                addSentLog(wheel.dumpOnCommand)
+                bluetoothManager.sendCommand(wheel.dumpOnCommand)
 
-            for (i in 5 downTo 1) {
-                _state.update { it.copy(timeRemainingSec = 5 + i) }
-                delay(1000)
-            }
+                for (i in 5 downTo 1) {
+                    _state.update { it.copy(timeRemainingSec = 5 + i) }
+                    delay(1000)
+                }
 
-            // Close DUMP Valve
-            addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})")
-            addSentLog(wheel.dumpOffCommand)
-            bluetoothManager.sendCommand(wheel.dumpOffCommand)
-            delay(300)
+                // Close DUMP Valve
+                addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})")
+                addSentLog(wheel.dumpOffCommand)
+                bluetoothManager.sendCommand(wheel.dumpOffCommand)
+                delay(300)
 
-            // Start ABS Pump (5s)
-            addSystemLog("Starting ABS Pump (30 02 07 01)")
-            addSentLog("30 02 07 01")
-            bluetoothManager.sendCommand("30 02 07 01")
+                // Start ABS Pump (5s)
+                addSystemLog("Starting ABS Pump (30 02 07 01)")
+                addSentLog("30 02 07 01")
+                bluetoothManager.sendCommand("30 02 07 01")
 
-            for (i in 5 downTo 1) {
-                _state.update { it.copy(timeRemainingSec = i) }
-                delay(1000)
-            }
+                for (i in 5 downTo 1) {
+                    _state.update { it.copy(timeRemainingSec = i) }
+                    delay(1000)
+                }
 
-            // Stop ABS Pump safely with 300ms confirmation gap
-            addSystemLog("Stopping ABS Pump (30 02 07 00)")
-            addSentLog("30 02 07 00")
-            bluetoothManager.sendCommand("30 02 07 00")
-            delay(300)
-            addSentLog("30 02 07 00")
-            bluetoothManager.sendCommand("30 02 07 00")
+                // Stop ABS Pump safely with 300ms confirmation gap
+                addSystemLog("Stopping ABS Pump (30 02 07 00)")
+                addSentLog("30 02 07 00")
+                bluetoothManager.sendCommand("30 02 07 00")
+                delay(300)
+                addSentLog("30 02 07 00")
+                bluetoothManager.sendCommand("30 02 07 00")
 
-            addSystemLog("--- Completed Full Bleed Macro for ${wheel.shortName} ---")
-            _state.update {
-                it.copy(
-                    activeOperation = null,
-                    timeRemainingSec = 0,
-                    isRunningSequence = false
-                )
+                addSystemLog("--- Completed Full Bleed Macro for ${wheel.shortName} ---")
+                _state.update {
+                    it.copy(
+                        activeOperation = null,
+                        timeRemainingSec = 0,
+                        isRunningSequence = false,
+                        executionState = BleedExecState.IDLE
+                    )
+                }
+                completedNormally = true
+            } catch (e: CancellationException) {
+                addSystemLog("Bleed macro cancelled.")
+                throw e
+            } finally {
+                if (!completedNormally) {
+                    executeCoordinatedStop(wheel)
+                }
             }
         }
     }
 
     fun runWheelBleedMacroSlow(wheel: WheelLocation) {
-        if (_state.value.isRunningSequence) return
+        if (_state.value.isRunningSequence || _state.value.executionState == BleedExecState.STOPPING) return
 
         activeJob = viewModelScope.launch {
             _state.update {
                 it.copy(
                     activeOperation = "Bleed Slow (${wheel.shortName})",
                     timeRemainingSec = 22,
-                    isRunningSequence = true
+                    isRunningSequence = true,
+                    executionState = BleedExecState.RUNNING
                 )
             }
 
-            addSystemLog("--- Starting Slow Bleed Sequence for ${wheel.title} (${wheel.shortName}) ---")
+            var completedNormally = false
+            try {
+                addSystemLog("--- Starting Slow Bleed Sequence for ${wheel.title} (${wheel.shortName}) ---")
 
-            executeSlowElm327Init()
+                executeSlowElm327Init()
 
-            // Open DUMP Valve (5s)
-            addSystemLog("Opening DUMP valve (${wheel.dumpOnCommand})")
-            addSentLog(wheel.dumpOnCommand)
-            bluetoothManager.sendCommand(wheel.dumpOnCommand)
+                // Open DUMP Valve (5s)
+                addSystemLog("Opening DUMP valve (${wheel.dumpOnCommand})")
+                addSentLog(wheel.dumpOnCommand)
+                bluetoothManager.sendCommand(wheel.dumpOnCommand)
 
-            for (i in 5 downTo 1) {
-                _state.update { it.copy(timeRemainingSec = 5 + i) }
-                delay(1000)
-            }
+                for (i in 5 downTo 1) {
+                    _state.update { it.copy(timeRemainingSec = 5 + i) }
+                    delay(1000)
+                }
 
-            // Close DUMP Valve
-            addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})")
-            addSentLog(wheel.dumpOffCommand)
-            bluetoothManager.sendCommand(wheel.dumpOffCommand)
-            delay(500)
+                // Close DUMP Valve
+                addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})")
+                addSentLog(wheel.dumpOffCommand)
+                bluetoothManager.sendCommand(wheel.dumpOffCommand)
+                delay(500)
 
-            // Start ABS Pump (5s)
-            addSystemLog("Starting ABS Pump (30 02 07 01)")
-            addSentLog("30 02 07 01")
-            bluetoothManager.sendCommand("30 02 07 01")
+                // Start ABS Pump (5s)
+                addSystemLog("Starting ABS Pump (30 02 07 01)")
+                addSentLog("30 02 07 01")
+                bluetoothManager.sendCommand("30 02 07 01")
 
-            for (i in 5 downTo 1) {
-                _state.update { it.copy(timeRemainingSec = i) }
-                delay(1000)
-            }
+                for (i in 5 downTo 1) {
+                    _state.update { it.copy(timeRemainingSec = i) }
+                    delay(1000)
+                }
 
-            // Stop ABS Pump safely with 300ms confirmation gap
-            addSystemLog("Stopping ABS Pump (30 02 07 00)")
-            addSentLog("30 02 07 00")
-            bluetoothManager.sendCommand("30 02 07 00")
-            delay(300)
-            addSentLog("30 02 07 00")
-            bluetoothManager.sendCommand("30 02 07 00")
+                // Stop ABS Pump safely with 300ms confirmation gap
+                addSystemLog("Stopping ABS Pump (30 02 07 00)")
+                addSentLog("30 02 07 00")
+                bluetoothManager.sendCommand("30 02 07 00")
+                delay(300)
+                addSentLog("30 02 07 00")
+                bluetoothManager.sendCommand("30 02 07 00")
 
-            addSystemLog("--- Completed Full Bleed Macro (Slow) for ${wheel.shortName} ---")
-            _state.update {
-                it.copy(
-                    activeOperation = null,
-                    timeRemainingSec = 0,
-                    isRunningSequence = false
-                )
+                addSystemLog("--- Completed Full Bleed Macro (Slow) for ${wheel.shortName} ---")
+                _state.update {
+                    it.copy(
+                        activeOperation = null,
+                        timeRemainingSec = 0,
+                        isRunningSequence = false,
+                        executionState = BleedExecState.IDLE
+                    )
+                }
+                completedNormally = true
+            } catch (e: CancellationException) {
+                addSystemLog("Slow bleed macro cancelled.")
+                throw e
+            } finally {
+                if (!completedNormally) {
+                    executeCoordinatedStop(wheel)
+                }
             }
         }
     }
@@ -312,95 +451,94 @@ class BleedViewModel(
             addSystemLog("USB is read-only: actuator commands are disabled.")
             return
         }
-        if (_state.value.isRunningSequence) return
+        if (_state.value.isRunningSequence || _state.value.executionState == BleedExecState.STOPPING) return
 
         activeJob = viewModelScope.launch {
             _state.update {
                 it.copy(
                     activeOperation = "Bleeding Test (${wheel.shortName})",
                     timeRemainingSec = 9,
-                    isRunningSequence = true
+                    isRunningSequence = true,
+                    executionState = BleedExecState.RUNNING
                 )
             }
 
             var completedNormally = false
             try {
-            addSystemLog("--- Starting Fast Hydraulic Pulse Test Macro for ${wheel.title} (${wheel.shortName}) ---")
+                addSystemLog("--- Starting Fast Hydraulic Pulse Test Macro for ${wheel.title} (${wheel.shortName}) ---")
 
-            executeSafeFastElm327Init()
+                executeSafeFastElm327Init()
 
-            // 1. Send DUMP ON
-            addSystemLog("Step 1/5: Opening DUMP valve (${wheel.dumpOnCommand})")
-            addSentLog(wheel.dumpOnCommand)
-            bluetoothManager.sendCommand(wheel.dumpOnCommand)
+                // 1. Send DUMP ON
+                addSystemLog("Step 1/5: Opening DUMP valve (${wheel.dumpOnCommand})")
+                addSentLog(wheel.dumpOnCommand)
+                bluetoothManager.sendCommand(wheel.dumpOnCommand)
 
-            // 2. Wait 1000 ms
-            addSystemLog("Step 2/5: Accumulating fluid (1000ms)...")
-            delay(1000)
+                // 2. Wait 1000 ms
+                addSystemLog("Step 2/5: Accumulating fluid (1000ms)...")
+                delay(1000)
 
-            // 3. Send ABS Pump ON
-            addSystemLog("Step 3/5: Starting ABS Pump ON (30 02 07 01)")
-            addSentLog("30 02 07 01")
-            bluetoothManager.sendCommand("30 02 07 01")
+                // 3. Send ABS Pump ON
+                addSystemLog("Step 3/5: Starting ABS Pump ON (30 02 07 01)")
+                addSentLog("30 02 07 01")
+                bluetoothManager.sendCommand("30 02 07 01")
 
-            // 4. Wait 1500 ms
-            addSystemLog("Step 4/5: Forced recirculation (1500ms)...")
-            delay(1500)
+                // 4. Wait 1500 ms
+                addSystemLog("Step 4/5: Forced recirculation (1500ms)...")
+                delay(1500)
 
-            // 5. 6 Pulsation cycles on ISO valve (300ms ON / 300ms OFF)
-            addSystemLog("Step 5/5: Executing 6 hydraulic pulsation cycles on ISO valve (300ms ON / 300ms OFF)...")
-            for (cycle in 1..6) {
-                addSystemLog("Pulse $cycle/6: ISO ON (${wheel.isoOnCommand})")
-                addSentLog(wheel.isoOnCommand)
-                bluetoothManager.sendCommand(wheel.isoOnCommand)
+                // 5. 6 Pulsation cycles on ISO valve (300ms ON / 300ms OFF)
+                addSystemLog("Step 5/5: Executing 6 hydraulic pulsation cycles on ISO valve (300ms ON / 300ms OFF)...")
+                for (cycle in 1..6) {
+                    addSystemLog("Pulse $cycle/6: ISO ON (${wheel.isoOnCommand})")
+                    addSentLog(wheel.isoOnCommand)
+                    bluetoothManager.sendCommand(wheel.isoOnCommand)
+                    delay(300)
+
+                    addSystemLog("Pulse $cycle/6: ISO OFF (${wheel.isoOffCommand})")
+                    addSentLog(wheel.isoOffCommand)
+                    bluetoothManager.sendCommand(wheel.isoOffCommand)
+                    delay(300)
+                }
+
+                // Turn off all actuators safely with 300ms gap between shutdown commands
+                addSystemLog("Turning off all actuators safely (Pump OFF -> DUMP OFF -> ISO OFF)...")
+
+                addSystemLog("Shutting down ABS Pump (30 02 07 00)...")
+                addSentLog("30 02 07 00")
+                bluetoothManager.sendCommand("30 02 07 00")
                 delay(300)
 
-                addSystemLog("Pulse $cycle/6: ISO OFF (${wheel.isoOffCommand})")
+                addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})...")
+                addSentLog(wheel.dumpOffCommand)
+                bluetoothManager.sendCommand(wheel.dumpOffCommand)
+                delay(300)
+
+                addSystemLog("Closing ISO valve (${wheel.isoOffCommand})...")
                 addSentLog(wheel.isoOffCommand)
                 bluetoothManager.sendCommand(wheel.isoOffCommand)
                 delay(300)
-            }
 
-            // Turn off all actuators safely with 300ms gap between shutdown commands
-            addSystemLog("Turning off all actuators safely (Pump OFF -> DUMP OFF -> ISO OFF)...")
+                // Safety confirmation
+                addSentLog("30 02 07 00")
+                bluetoothManager.sendCommand("30 02 07 00")
 
-            addSystemLog("Shutting down ABS Pump (30 02 07 00)...")
-            addSentLog("30 02 07 00")
-            bluetoothManager.sendCommand("30 02 07 00")
-            delay(300)
-
-            addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})...")
-            addSentLog(wheel.dumpOffCommand)
-            bluetoothManager.sendCommand(wheel.dumpOffCommand)
-            delay(300)
-
-            addSystemLog("Closing ISO valve (${wheel.isoOffCommand})...")
-            addSentLog(wheel.isoOffCommand)
-            bluetoothManager.sendCommand(wheel.isoOffCommand)
-            delay(300)
-
-            // Safety confirmation
-            addSentLog("30 02 07 00")
-            bluetoothManager.sendCommand("30 02 07 00")
-
-            addSystemLog("--- Completed Hydraulic Pulse Test Macro for ${wheel.shortName} ---")
-            _state.update {
-                it.copy(
-                    activeOperation = null,
-                    timeRemainingSec = 0,
-                    isRunningSequence = false
-                )
-            }
+                addSystemLog("--- Completed Hydraulic Pulse Test Macro for ${wheel.shortName} ---")
+                _state.update {
+                    it.copy(
+                        activeOperation = null,
+                        timeRemainingSec = 0,
+                        isRunningSequence = false,
+                        executionState = BleedExecState.IDLE
+                    )
+                }
                 completedNormally = true
+            } catch (e: CancellationException) {
+                addSystemLog("Pulse test macro cancelled.")
+                throw e
             } finally {
                 if (!completedNormally) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                        addSystemLog("Sequence interrupted: attempting actuator OFF commands; verify ECU responses before use.")
-                        bluetoothManager.sendCommand("30 02 07 00")
-                        bluetoothManager.sendCommand(wheel.dumpOffCommand)
-                        bluetoothManager.sendCommand(wheel.isoOffCommand)
-                        _state.update { it.copy(activeOperation = null, timeRemainingSec = 0, isRunningSequence = false) }
-                    }
+                    executeCoordinatedStop(wheel)
                 }
             }
         }
@@ -411,95 +549,94 @@ class BleedViewModel(
             addSystemLog("USB is read-only: actuator commands are disabled.")
             return
         }
-        if (_state.value.isRunningSequence) return
+        if (_state.value.isRunningSequence || _state.value.executionState == BleedExecState.STOPPING) return
 
         activeJob = viewModelScope.launch {
             _state.update {
                 it.copy(
                     activeOperation = "Bleeding Test Slow (${wheel.shortName})",
                     timeRemainingSec = 18,
-                    isRunningSequence = true
+                    isRunningSequence = true,
+                    executionState = BleedExecState.RUNNING
                 )
             }
 
             var completedNormally = false
             try {
-            addSystemLog("--- Starting Slow Hydraulic Pulse Test Macro for ${wheel.title} (${wheel.shortName}) ---")
+                addSystemLog("--- Starting Slow Hydraulic Pulse Test Macro for ${wheel.title} (${wheel.shortName}) ---")
 
-            executeSlowElm327Init()
+                executeSlowElm327Init()
 
-            // 1. Send DUMP ON
-            addSystemLog("Step 1/5: Opening DUMP valve (${wheel.dumpOnCommand})")
-            addSentLog(wheel.dumpOnCommand)
-            bluetoothManager.sendCommand(wheel.dumpOnCommand)
+                // 1. Send DUMP ON
+                addSystemLog("Step 1/5: Opening DUMP valve (${wheel.dumpOnCommand})")
+                addSentLog(wheel.dumpOnCommand)
+                bluetoothManager.sendCommand(wheel.dumpOnCommand)
 
-            // 2. Wait 1000 ms
-            addSystemLog("Step 2/5: Accumulating fluid (1000ms)...")
-            delay(1000)
+                // 2. Wait 1000 ms
+                addSystemLog("Step 2/5: Accumulating fluid (1000ms)...")
+                delay(1000)
 
-            // 3. Send ABS Pump ON
-            addSystemLog("Step 3/5: Starting ABS Pump ON (30 02 07 01)")
-            addSentLog("30 02 07 01")
-            bluetoothManager.sendCommand("30 02 07 01")
+                // 3. Send ABS Pump ON
+                addSystemLog("Step 3/5: Starting ABS Pump ON (30 02 07 01)")
+                addSentLog("30 02 07 01")
+                bluetoothManager.sendCommand("30 02 07 01")
 
-            // 4. Wait 1500 ms
-            addSystemLog("Step 4/5: Forced recirculation (1500ms)...")
-            delay(1500)
+                // 4. Wait 1500 ms
+                addSystemLog("Step 4/5: Forced recirculation (1500ms)...")
+                delay(1500)
 
-            // 5. 6 Pulsation cycles on ISO valve (300ms ON / 300ms OFF)
-            addSystemLog("Step 5/5: Executing 6 hydraulic pulsation cycles on ISO valve (300ms ON / 300ms OFF)...")
-            for (cycle in 1..6) {
-                addSystemLog("Pulse $cycle/6: ISO ON (${wheel.isoOnCommand})")
-                addSentLog(wheel.isoOnCommand)
-                bluetoothManager.sendCommand(wheel.isoOnCommand)
+                // 5. 6 Pulsation cycles on ISO valve (300ms ON / 300ms OFF)
+                addSystemLog("Step 5/5: Executing 6 hydraulic pulsation cycles on ISO valve (300ms ON / 300ms OFF)...")
+                for (cycle in 1..6) {
+                    addSystemLog("Pulse $cycle/6: ISO ON (${wheel.isoOnCommand})")
+                    addSentLog(wheel.isoOnCommand)
+                    bluetoothManager.sendCommand(wheel.isoOnCommand)
+                    delay(300)
+
+                    addSystemLog("Pulse $cycle/6: ISO OFF (${wheel.isoOffCommand})")
+                    addSentLog(wheel.isoOffCommand)
+                    bluetoothManager.sendCommand(wheel.isoOffCommand)
+                    delay(300)
+                }
+
+                // Turn off all actuators safely with 300ms gap between shutdown commands
+                addSystemLog("Turning off all actuators safely (Pump OFF -> DUMP OFF -> ISO OFF)...")
+
+                addSystemLog("Shutting down ABS Pump (30 02 07 00)...")
+                addSentLog("30 02 07 00")
+                bluetoothManager.sendCommand("30 02 07 00")
                 delay(300)
 
-                addSystemLog("Pulse $cycle/6: ISO OFF (${wheel.isoOffCommand})")
+                addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})...")
+                addSentLog(wheel.dumpOffCommand)
+                bluetoothManager.sendCommand(wheel.dumpOffCommand)
+                delay(300)
+
+                addSystemLog("Closing ISO valve (${wheel.isoOffCommand})...")
                 addSentLog(wheel.isoOffCommand)
                 bluetoothManager.sendCommand(wheel.isoOffCommand)
                 delay(300)
-            }
 
-            // Turn off all actuators safely with 300ms gap between shutdown commands
-            addSystemLog("Turning off all actuators safely (Pump OFF -> DUMP OFF -> ISO OFF)...")
+                // Safety confirmation
+                addSentLog("30 02 07 00")
+                bluetoothManager.sendCommand("30 02 07 00")
 
-            addSystemLog("Shutting down ABS Pump (30 02 07 00)...")
-            addSentLog("30 02 07 00")
-            bluetoothManager.sendCommand("30 02 07 00")
-            delay(300)
-
-            addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})...")
-            addSentLog(wheel.dumpOffCommand)
-            bluetoothManager.sendCommand(wheel.dumpOffCommand)
-            delay(300)
-
-            addSystemLog("Closing ISO valve (${wheel.isoOffCommand})...")
-            addSentLog(wheel.isoOffCommand)
-            bluetoothManager.sendCommand(wheel.isoOffCommand)
-            delay(300)
-
-            // Safety confirmation
-            addSentLog("30 02 07 00")
-            bluetoothManager.sendCommand("30 02 07 00")
-
-            addSystemLog("--- Completed Hydraulic Pulse Test Macro (Slow) for ${wheel.shortName} ---")
-            _state.update {
-                it.copy(
-                    activeOperation = null,
-                    timeRemainingSec = 0,
-                    isRunningSequence = false
-                )
-            }
+                addSystemLog("--- Completed Hydraulic Pulse Test Macro (Slow) for ${wheel.shortName} ---")
+                _state.update {
+                    it.copy(
+                        activeOperation = null,
+                        timeRemainingSec = 0,
+                        isRunningSequence = false,
+                        executionState = BleedExecState.IDLE
+                    )
+                }
                 completedNormally = true
+            } catch (e: CancellationException) {
+                addSystemLog("Slow pulse test macro cancelled.")
+                throw e
             } finally {
                 if (!completedNormally) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                        addSystemLog("Sequence interrupted: attempting actuator OFF commands; verify ECU responses before use.")
-                        bluetoothManager.sendCommand("30 02 07 00")
-                        bluetoothManager.sendCommand(wheel.dumpOffCommand)
-                        bluetoothManager.sendCommand(wheel.isoOffCommand)
-                        _state.update { it.copy(activeOperation = null, timeRemainingSec = 0, isRunningSequence = false) }
-                    }
+                    executeCoordinatedStop(wheel)
                 }
             }
         }
@@ -510,11 +647,19 @@ class BleedViewModel(
             addSystemLog("USB is read-only: actuator commands are disabled.")
             return
         }
-        if (_state.value.isRunningSequence) return
+        if (_state.value.isRunningSequence || _state.value.executionState == BleedExecState.STOPPING) return
 
         activeJob = viewModelScope.launch {
+            var completedNormally = false
             try {
-                _state.update { it.copy(activeOperation = name, timeRemainingSec = durationSec, isRunningSequence = true) }
+                _state.update {
+                    it.copy(
+                        activeOperation = name,
+                        timeRemainingSec = durationSec,
+                        isRunningSequence = true,
+                        executionState = BleedExecState.RUNNING
+                    )
+                }
                 addSystemLog("Starting $name sequence...")
 
                 addSentLog(onCommand)
@@ -524,76 +669,35 @@ class BleedViewModel(
                     _state.update { it.copy(timeRemainingSec = i) }
                     delay(1000)
                 }
+                completedNormally = true
+            } catch (e: CancellationException) {
+                addSystemLog("$name sequence cancelled.")
+                throw e
             } finally {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                    addSystemLog("Stopping all components...")
-                    
-                    // Spegniamo la valvola/comando specifico usato
-                    addSentLog(offCommand)
-                    bluetoothManager.sendCommand(offCommand)
-                    
-                    // Piccolo buffer per l'ELM327
-                    delay(200)
-                    
-                    // Spegnimento forzato Pompa
-                    addSentLog("30 02 07 00")
-                    bluetoothManager.sendCommand("30 02 07 00")
-                    
-                    // Piccolo buffer
-                    delay(200)
-                    
-                    // Spegnimento forzato Relè Valvole
-                    addSentLog("30 03 07 00")
-                    bluetoothManager.sendCommand("30 03 07 00")
-                    
-                    addSystemLog("Finished $name sequence.")
-                    _state.update { it.copy(activeOperation = null, timeRemainingSec = 0, isRunningSequence = false) }
+                if (!completedNormally) {
+                    executeCoordinatedStop(_state.value.selectedWheel)
+                } else {
+                    withContext(NonCancellable) {
+                        addSystemLog("Stopping $name components...")
+                        addSentLog(offCommand)
+                        bluetoothManager.sendCommand(offCommand)
+                        delay(200)
+                        addSentLog("30 02 07 00")
+                        bluetoothManager.sendCommand("30 02 07 00")
+                        delay(200)
+                        addSentLog("30 03 07 00")
+                        bluetoothManager.sendCommand("30 03 07 00")
+                        addSystemLog("Finished $name sequence.")
+                        _state.update {
+                            it.copy(
+                                activeOperation = null,
+                                timeRemainingSec = 0,
+                                isRunningSequence = false,
+                                executionState = BleedExecState.IDLE
+                            )
+                        }
+                    }
                 }
-            }
-        }
-    }
-
-    fun emergencyStop() {
-        activeJob?.cancel()
-        activeJob = null
-
-        viewModelScope.launch {
-            addSystemLog("🛑 EMERGENCY STOP EXECUTED!")
-
-            // Immediately send Pump OFF
-            addSentLog("30 02 07 00")
-            bluetoothManager.sendCommand("30 02 07 00")
-            delay(200)
-
-            // Immediately close all DUMP valves for safety
-            val currentWheel = _state.value.selectedWheel
-            if (currentWheel != null) {
-                addSentLog(currentWheel.dumpOffCommand)
-                bluetoothManager.sendCommand(currentWheel.dumpOffCommand)
-                delay(200)
-                addSentLog(currentWheel.isoOffCommand)
-                bluetoothManager.sendCommand(currentWheel.isoOffCommand)
-                delay(200)
-            } else {
-                val allCloseCommands = listOf("30 11 07 00", "30 21 07 00", "30 31 07 00", "30 41 07 00")
-                for (cmd in allCloseCommands) {
-                    addSentLog(cmd)
-                    bluetoothManager.sendCommand(cmd)
-                    delay(100)
-                }
-            }
-
-            // Safety double check pump OFF
-            addSentLog("30 02 07 00")
-            bluetoothManager.sendCommand("30 02 07 00")
-
-            addSystemLog("OFF commands sent; ECU actuator state is NOT independently confirmed.")
-            _state.update {
-                it.copy(
-                    activeOperation = null,
-                    timeRemainingSec = 0,
-                    isRunningSequence = false
-                )
             }
         }
     }

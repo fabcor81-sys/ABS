@@ -150,14 +150,20 @@ class ConnectionViewModel(
     private fun initializeELM327() {
         viewModelScope.launch {
             try {
-                bluetoothManager.sendCommand("AT Z")      // Reset
-                delay(300)
-                bluetoothManager.sendCommand("AT E0")     // Echo off
-                delay(100)
-                bluetoothManager.sendCommand("AT L0")     // Line feeds off
-                delay(100)
-                bluetoothManager.sendCommand("AT SP 6")   // Set protocol KWP2000
-                delay(100)
+                bluetoothManager.sendCommand("AT Z")          // Reset
+                delay(1000)
+                bluetoothManager.sendCommand("AT E0")         // Echo off
+                delay(200)
+                bluetoothManager.sendCommand("AT L0")         // Line feeds off
+                delay(200)
+                bluetoothManager.sendCommand("AT ST 32")       // ECU timeout
+                delay(200)
+                bluetoothManager.sendCommand("AT SH 812BF1")   // Set Header for EBC430
+                delay(200)
+                bluetoothManager.sendCommand("AT WM 812BF13E") // Set Wakeup message
+                delay(200)
+                bluetoothManager.sendCommand("AT SP 5")       // ISO 14230-4 KWP2000 Fast Init
+                delay(200)
                 bluetoothManager.sendCommand("ATRV")
             } catch (e: Exception) {
                 _state.emit(_state.value.copy(ecuInfo = "Initialization Error: ${e.message}"))
