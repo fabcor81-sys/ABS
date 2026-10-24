@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -112,6 +113,8 @@ class BleedViewModel(
             bluetoothManager.connectionState.collect { connState ->
                 if (connState != BluetoothManager.ConnectionState.CONNECTED && _state.value.isRunningSequence) {
                     addSystemLog("⚠️ Connection lost during active sequence!")
+                    activeJob?.cancel()
+                    activeJob = null
                     _state.update {
                         it.copy(
                             activeOperation = null,
@@ -219,6 +222,38 @@ class BleedViewModel(
 
         addSystemLog("Slow Init 5/5: DTC retained (automatic clearing disabled)")
         delay(2000)
+    }
+
+    private suspend fun executeMacroStep(
+        commandHex: String,
+        category: CommandCategory,
+        wheel: WheelLocation
+    ): Boolean {
+        if (checkStopRequested() || !activeTransport.isConnected) {
+            return false
+        }
+
+        addSentLog(commandHex)
+        val t0 = System.nanoTime()
+        val result = activeTransport.executeCommand(commandHex, category)
+        val t1 = System.nanoTime()
+        val durationMs = (t1 - t0) / 1_000_000.0
+
+        addSystemLog(
+            String.format(
+                Locale.US,
+                "[DIAG TIMING] Cmd '%s' -> %s (RTT: %.1fms)",
+                commandHex, result.status, durationMs
+            )
+        )
+
+        if (!result.isSuccess && result.status != CommandStatus.TRANSMITTED) {
+            addSystemLog("⚠️ Command '$commandHex' failed with status ${result.status} (${result.statusText}). Aborting macro!")
+            executeCoordinatedStop(wheel)
+            return false
+        }
+
+        return true
     }
 
     /**
@@ -341,13 +376,12 @@ class BleedViewModel(
         if (_state.value.isRunningSequence || checkStopRequested()) return
 
         activeJob = viewModelScope.launch {
-            if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB) {
-                val actuatorRes = activeTransport.executeCommand(wheel.dumpOnCommand, CommandCategory.ACTUATOR_CONTROL)
-                if (actuatorRes.status == CommandStatus.BLOCKED_SAFETY_GUARD) {
-                    addSystemLog("USB is read-only on real hardware: actuator commands are disabled.")
-                    return@launch
-                }
+            // Non-invasive capability check (sends 0 bytes to ECU)
+            if (!activeTransport.canExecute(CommandCategory.ACTUATOR_CONTROL)) {
+                addSystemLog("USB is read-only on real hardware: actuator commands are disabled.")
+                return@launch
             }
+
             _state.update {
                 it.copy(
                     activeOperation = "Bleeding Test (${wheel.shortName})",
@@ -366,9 +400,7 @@ class BleedViewModel(
 
                 // 1. Send DUMP ON
                 addSystemLog("Step 1/5: Opening DUMP valve (${wheel.dumpOnCommand})")
-                addSentLog(wheel.dumpOnCommand)
-                activeTransport.executeCommand(wheel.dumpOnCommand, CommandCategory.ACTUATOR_CONTROL)
-                if (checkStopRequested()) return@launch
+                if (!executeMacroStep(wheel.dumpOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
 
                 // 2. Wait 1000 ms
                 addSystemLog("Step 2/5: Accumulating fluid (1000ms)...")
@@ -377,9 +409,7 @@ class BleedViewModel(
 
                 // 3. Send ABS Pump ON
                 addSystemLog("Step 3/5: Starting ABS Pump ON (30 02 07 01)")
-                addSentLog("30 02 07 01")
-                activeTransport.executeCommand("30 02 07 01", CommandCategory.ACTUATOR_CONTROL)
-                if (checkStopRequested()) return@launch
+                if (!executeMacroStep("30 02 07 01", CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
 
                 // 4. Wait 1500 ms
                 addSystemLog("Step 4/5: Forced recirculation (1500ms)...")
@@ -391,14 +421,12 @@ class BleedViewModel(
                 for (cycle in 1..6) {
                     if (checkStopRequested()) return@launch
                     addSystemLog("Pulse $cycle/6: ISO ON (${wheel.isoOnCommand})")
-                    addSentLog(wheel.isoOnCommand)
-                    activeTransport.executeCommand(wheel.isoOnCommand, CommandCategory.ACTUATOR_CONTROL)
+                    if (!executeMacroStep(wheel.isoOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
                     delay(300)
 
                     if (checkStopRequested()) return@launch
                     addSystemLog("Pulse $cycle/6: ISO OFF (${wheel.isoOffCommand})")
-                    addSentLog(wheel.isoOffCommand)
-                    activeTransport.executeCommand(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL)
+                    if (!executeMacroStep(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
                     delay(300)
                 }
 
@@ -408,23 +436,19 @@ class BleedViewModel(
                 addSystemLog("Turning off all actuators safely (Pump OFF -> DUMP OFF -> ISO OFF)...")
 
                 addSystemLog("Shutting down ABS Pump (30 02 07 00)...")
-                addSentLog("30 02 07 00")
-                activeTransport.executeCommand("30 02 07 00", CommandCategory.ACTUATOR_CONTROL)
+                executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel)
                 delay(300)
 
                 addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})...")
-                addSentLog(wheel.dumpOffCommand)
-                activeTransport.executeCommand(wheel.dumpOffCommand, CommandCategory.ACTUATOR_CONTROL)
+                executeMacroStep(wheel.dumpOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel)
                 delay(300)
 
                 addSystemLog("Closing ISO valve (${wheel.isoOffCommand})...")
-                addSentLog(wheel.isoOffCommand)
-                activeTransport.executeCommand(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL)
+                executeMacroStep(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel)
                 delay(300)
 
                 // Safety confirmation
-                addSentLog("30 02 07 00")
-                activeTransport.executeCommand("30 02 07 00", CommandCategory.ACTUATOR_CONTROL)
+                executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel)
 
                 addSystemLog("--- Completed Hydraulic Pulse Test Macro for ${wheel.shortName} ---")
                 _state.update {
@@ -451,13 +475,12 @@ class BleedViewModel(
         if (_state.value.isRunningSequence || checkStopRequested()) return
 
         activeJob = viewModelScope.launch {
-            if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB) {
-                val actuatorRes = activeTransport.executeCommand(wheel.dumpOnCommand, CommandCategory.ACTUATOR_CONTROL)
-                if (actuatorRes.status == CommandStatus.BLOCKED_SAFETY_GUARD) {
-                    addSystemLog("USB is read-only on real hardware: actuator commands are disabled.")
-                    return@launch
-                }
+            // Non-invasive capability check (sends 0 bytes to ECU)
+            if (!activeTransport.canExecute(CommandCategory.ACTUATOR_CONTROL)) {
+                addSystemLog("USB is read-only on real hardware: actuator commands are disabled.")
+                return@launch
             }
+
             _state.update {
                 it.copy(
                     activeOperation = "Bleeding Test Slow (${wheel.shortName})",
@@ -476,9 +499,7 @@ class BleedViewModel(
 
                 // 1. Send DUMP ON
                 addSystemLog("Step 1/5: Opening DUMP valve (${wheel.dumpOnCommand})")
-                addSentLog(wheel.dumpOnCommand)
-                activeTransport.executeCommand(wheel.dumpOnCommand, CommandCategory.ACTUATOR_CONTROL)
-                if (checkStopRequested()) return@launch
+                if (!executeMacroStep(wheel.dumpOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
 
                 // 2. Wait 1000 ms
                 addSystemLog("Step 2/5: Accumulating fluid (1000ms)...")
@@ -487,9 +508,7 @@ class BleedViewModel(
 
                 // 3. Send ABS Pump ON
                 addSystemLog("Step 3/5: Starting ABS Pump ON (30 02 07 01)")
-                addSentLog("30 02 07 01")
-                activeTransport.executeCommand("30 02 07 01", CommandCategory.ACTUATOR_CONTROL)
-                if (checkStopRequested()) return@launch
+                if (!executeMacroStep("30 02 07 01", CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
 
                 // 4. Wait 1500 ms
                 addSystemLog("Step 4/5: Forced recirculation (1500ms)...")
@@ -501,14 +520,12 @@ class BleedViewModel(
                 for (cycle in 1..6) {
                     if (checkStopRequested()) return@launch
                     addSystemLog("Pulse $cycle/6: ISO ON (${wheel.isoOnCommand})")
-                    addSentLog(wheel.isoOnCommand)
-                    activeTransport.executeCommand(wheel.isoOnCommand, CommandCategory.ACTUATOR_CONTROL)
+                    if (!executeMacroStep(wheel.isoOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
                     delay(300)
 
                     if (checkStopRequested()) return@launch
                     addSystemLog("Pulse $cycle/6: ISO OFF (${wheel.isoOffCommand})")
-                    addSentLog(wheel.isoOffCommand)
-                    activeTransport.executeCommand(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL)
+                    if (!executeMacroStep(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
                     delay(300)
                 }
 
@@ -518,23 +535,19 @@ class BleedViewModel(
                 addSystemLog("Turning off all actuators safely (Pump OFF -> DUMP OFF -> ISO OFF)...")
 
                 addSystemLog("Shutting down ABS Pump (30 02 07 00)...")
-                addSentLog("30 02 07 00")
-                activeTransport.executeCommand("30 02 07 00", CommandCategory.ACTUATOR_CONTROL)
+                executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel)
                 delay(300)
 
                 addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})...")
-                addSentLog(wheel.dumpOffCommand)
-                activeTransport.executeCommand(wheel.dumpOffCommand, CommandCategory.ACTUATOR_CONTROL)
+                executeMacroStep(wheel.dumpOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel)
                 delay(300)
 
                 addSystemLog("Closing ISO valve (${wheel.isoOffCommand})...")
-                addSentLog(wheel.isoOffCommand)
-                activeTransport.executeCommand(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL)
+                executeMacroStep(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel)
                 delay(300)
 
                 // Safety confirmation
-                addSentLog("30 02 07 00")
-                activeTransport.executeCommand("30 02 07 00", CommandCategory.ACTUATOR_CONTROL)
+                executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel)
 
                 addSystemLog("--- Completed Hydraulic Pulse Test Macro (Slow) for ${wheel.shortName} ---")
                 _state.update {
@@ -566,7 +579,7 @@ class BleedViewModel(
     }
 
     fun runBleedSequence(name: String, onCommand: String, offCommand: String, durationSec: Int) {
-        if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB) {
+        if (!activeTransport.canExecute(CommandCategory.ACTUATOR_CONTROL)) {
             addSystemLog("USB is read-only on real hardware: actuator commands are disabled.")
             return
         }

@@ -22,12 +22,22 @@ data class DiagnosticCommandResult(
     val requestHex: String,
     val responseHex: String = "",
     val statusText: String = "",
-    val nrcCode: String? = null
+    val nrcCode: String? = null,
+    val txStartNanos: Long = 0L,
+    val rxCompleteNanos: Long = 0L,
+    val totalRoundTripMs: Double = 0.0
 )
 
 interface DiagnosticTransport {
     val transportName: String
     val isConnected: Boolean
+
+    /**
+     * Non-invasive capability check.
+     * Determines whether the given command category can be executed by this transport
+     * without sending any bytes over the bus or causing any side-effects.
+     */
+    fun canExecute(category: CommandCategory): Boolean
 
     suspend fun executeCommand(
         commandHex: String,

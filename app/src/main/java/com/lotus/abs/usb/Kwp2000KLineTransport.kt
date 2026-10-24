@@ -231,6 +231,14 @@ class Kwp2000KLineTransport(
         }
     }
 
+    override fun canExecute(category: CommandCategory): Boolean {
+        if (!isConnected) return false
+        return when (category) {
+            CommandCategory.READ_ONLY -> true
+            CommandCategory.ACTUATOR_CONTROL -> isRealHardwareActuatorExecutionEnabled
+        }
+    }
+
     override suspend fun executeCommand(
         commandHex: String,
         category: CommandCategory,
@@ -238,26 +246,24 @@ class Kwp2000KLineTransport(
     ): DiagnosticCommandResult {
         val cleanCmd = commandHex.replace(" ", "").uppercase(Locale.US)
 
-        if (!isConnected) {
+        if (!canExecute(category)) {
+            val msg = if (!isConnected) {
+                "USB KKL Transport disconnected"
+            } else if (category == CommandCategory.ACTUATOR_CONTROL && !isRealHardwareActuatorExecutionEnabled) {
+                "BLOCKED_SAFETY_GUARD: Real USB actuator execution is disabled in this phase."
+            } else {
+                "BLOCKED_NOT_IN_WHITELIST: Command '$cleanCmd' not in allowed set."
+            }
+            Log.w(TAG, msg)
             return DiagnosticCommandResult(
-                status = CommandStatus.DISCONNECTED,
+                status = if (!isConnected) CommandStatus.DISCONNECTED else CommandStatus.BLOCKED_SAFETY_GUARD,
                 isSuccess = false,
                 requestHex = cleanCmd,
-                statusText = "USB KKL Transport disconnected"
+                statusText = msg
             )
         }
 
         if (category == CommandCategory.ACTUATOR_CONTROL) {
-            if (!isRealHardwareActuatorExecutionEnabled) {
-                val msg = "BLOCKED_SAFETY_GUARD: Real USB actuator execution is disabled in this phase."
-                Log.w(TAG, msg)
-                return DiagnosticCommandResult(
-                    status = CommandStatus.BLOCKED_SAFETY_GUARD,
-                    isSuccess = false,
-                    requestHex = cleanCmd,
-                    statusText = msg
-                )
-            }
             if (!ALLOWED_ACTUATOR_COMMANDS_HEX.contains(cleanCmd)) {
                 val msg = "BLOCKED_NOT_IN_WHITELIST: Actuator command '$cleanCmd' not in allowed actuator set."
                 Log.w(TAG, msg)
@@ -289,24 +295,30 @@ class Kwp2000KLineTransport(
         cleanCmd: String,
         kwpResult: KwpExchangeResult
     ): DiagnosticCommandResult {
+        val baseTiming = DiagnosticCommandResult(
+            status = CommandStatus.COMMUNICATION_ERROR,
+            isSuccess = false,
+            requestHex = cleanCmd,
+            txStartNanos = kwpResult.t0Nanos,
+            rxCompleteNanos = kwpResult.t3Nanos,
+            totalRoundTripMs = kwpResult.totalRoundTripMs
+        )
+
         if (kwpResult.isSuccess && kwpResult.kwpFrame != null) {
-            return DiagnosticCommandResult(
+            return baseTiming.copy(
                 status = CommandStatus.ACKNOWLEDGED,
                 isSuccess = true,
-                requestHex = cleanCmd,
                 responseHex = kwpResult.payloadHex,
                 statusText = "ACKNOWLEDGED: ${kwpResult.statusText}"
             )
         }
 
         if (kwpResult.statusText.contains("NEGATIVE_RESPONSE") || kwpResult.payloadHex.startsWith("7F")) {
-            val nrc = if (kwpResult.kwpFrame?.payload?.size ?: 0 >= 3) {
+            val nrc = if ((kwpResult.kwpFrame?.payload?.size ?: 0) >= 3) {
                 String.format("%02X", kwpResult.kwpFrame!!.payload[2].toInt() and 0xFF)
             } else null
-            return DiagnosticCommandResult(
+            return baseTiming.copy(
                 status = CommandStatus.NEGATIVE_RESPONSE,
-                isSuccess = false,
-                requestHex = cleanCmd,
                 responseHex = kwpResult.payloadHex,
                 statusText = kwpResult.statusText,
                 nrcCode = nrc
@@ -314,28 +326,22 @@ class Kwp2000KLineTransport(
         }
 
         if (kwpResult.statusText.contains("INCOMPLETE_RESPONSE") || kwpResult.statusText.contains("TIMEOUT")) {
-            return DiagnosticCommandResult(
+            return baseTiming.copy(
                 status = CommandStatus.TIMEOUT,
-                isSuccess = false,
-                requestHex = cleanCmd,
                 responseHex = kwpResult.payloadHex,
                 statusText = kwpResult.statusText
             )
         }
 
         if (kwpResult.statusText.contains("BLOCKED")) {
-            return DiagnosticCommandResult(
+            return baseTiming.copy(
                 status = CommandStatus.BLOCKED_SAFETY_GUARD,
-                isSuccess = false,
-                requestHex = cleanCmd,
                 statusText = kwpResult.statusText
             )
         }
 
-        return DiagnosticCommandResult(
+        return baseTiming.copy(
             status = CommandStatus.COMMUNICATION_ERROR,
-            isSuccess = false,
-            requestHex = cleanCmd,
             responseHex = kwpResult.payloadHex,
             statusText = kwpResult.statusText
         )

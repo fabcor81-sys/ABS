@@ -20,6 +20,7 @@ import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.lotus.abs.transport.CommandCategory
 import com.lotus.abs.transport.CommandStatus
@@ -582,6 +583,14 @@ open class BluetoothManager(private val context: Context? = null) : DiagnosticTr
         FileLogger.logTerminal("<", receivedString.trim())
     }
 
+    override fun canExecute(category: CommandCategory): Boolean {
+        if (!isConnected) return false
+        return when (category) {
+            CommandCategory.READ_ONLY -> true
+            CommandCategory.ACTUATOR_CONTROL -> true
+        }
+    }
+
     override suspend fun executeCommand(
         commandHex: String,
         category: CommandCategory,
@@ -619,10 +628,7 @@ open class BluetoothManager(private val context: Context? = null) : DiagnosticTr
         timeoutMs: Long
     ): DiagnosticCommandResult {
         val cleanCmd = commandHex.replace(" ", "").uppercase(Locale.US)
-        val serviceByteHex = if (cleanCmd.length >= 2) cleanCmd.substring(0, 2) else ""
-        val expectedPosServiceHex = try {
-            String.format("%02X", (serviceByteHex.toInt(16) + 0x40) and 0xFF)
-        } catch (_: Exception) { "" }
+        val t0Nanos = SystemClock.elapsedRealtimeNanos()
 
         var responsePayload = ""
         var commandTransmitted = false
@@ -642,49 +648,110 @@ open class BluetoothManager(private val context: Context? = null) : DiagnosticTr
             commandTransmitted = true
         } catch (e: Exception) {
             job.cancel()
+            val t1Nanos = SystemClock.elapsedRealtimeNanos()
             return DiagnosticCommandResult(
                 status = CommandStatus.COMMUNICATION_ERROR,
                 isSuccess = false,
                 requestHex = cleanCmd,
-                statusText = "Write error: ${e.message}"
+                statusText = "Write error: ${e.message}",
+                txStartNanos = t0Nanos,
+                rxCompleteNanos = t1Nanos,
+                totalRoundTripMs = (t1Nanos - t0Nanos) / 1_000_000.0
             )
         }
+
+        val isAtCommand = cleanCmd.startsWith("AT")
 
         val startTime = System.currentTimeMillis()
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             if (responsePayload.contains("\n") || responsePayload.contains(">")) {
-                val lines = responsePayload.split("\n", "\r", ">").map { it.trim().replace(" ", "").uppercase(Locale.US) }
-                for (line in lines) {
-                    if (expectedPosServiceHex.isNotEmpty() && line.contains(expectedPosServiceHex)) {
-                        job.cancel()
-                        return DiagnosticCommandResult(
-                            status = CommandStatus.ACKNOWLEDGED,
-                            isSuccess = true,
-                            requestHex = cleanCmd,
-                            responseHex = line,
-                            statusText = "ACKNOWLEDGED: ECU returned positive response $line"
-                        )
+                val lines = responsePayload.split("\n", "\r", ">")
+                    .map { it.trim().replace(" ", "").uppercase(Locale.US) }
+                    .filter { it.isNotEmpty() }
+
+                if (isAtCommand) {
+                    // Category A: ELM327 AT Configuration Commands
+                    for (line in lines) {
+                        if (line == "OK" || line.contains("ELM327") || line.contains("V1.") || line.contains("V2.") || (responsePayload.contains(">") && lines.isNotEmpty())) {
+                            job.cancel()
+                            val t1Nanos = SystemClock.elapsedRealtimeNanos()
+                            return DiagnosticCommandResult(
+                                status = CommandStatus.ACKNOWLEDGED,
+                                isSuccess = true,
+                                requestHex = cleanCmd,
+                                responseHex = line,
+                                statusText = "AT_SUCCESS: ELM327 responded $line",
+                                txStartNanos = t0Nanos,
+                                rxCompleteNanos = t1Nanos,
+                                totalRoundTripMs = (t1Nanos - t0Nanos) / 1_000_000.0
+                            )
+                        }
+                        if (line.contains("ERROR") || line == "?") {
+                            job.cancel()
+                            val t1Nanos = SystemClock.elapsedRealtimeNanos()
+                            return DiagnosticCommandResult(
+                                status = CommandStatus.NEGATIVE_RESPONSE,
+                                isSuccess = false,
+                                requestHex = cleanCmd,
+                                responseHex = line,
+                                statusText = "AT_ERROR: ELM327 error response $line",
+                                txStartNanos = t0Nanos,
+                                rxCompleteNanos = t1Nanos,
+                                totalRoundTripMs = (t1Nanos - t0Nanos) / 1_000_000.0
+                            )
+                        }
                     }
-                    if (line.startsWith("7F") || line.contains("7F${serviceByteHex}")) {
-                        job.cancel()
-                        val nrc = if (line.length >= 6) line.substring(4, 6) else null
-                        return DiagnosticCommandResult(
-                            status = CommandStatus.NEGATIVE_RESPONSE,
-                            isSuccess = false,
-                            requestHex = cleanCmd,
-                            responseHex = line,
-                            statusText = "NEGATIVE_RESPONSE: ECU returned NRC $line",
-                            nrcCode = nrc
-                        )
-                    }
-                    if (line.contains("NODATA") || line.contains("CANERROR") || line.contains("BUSERROR")) {
-                        job.cancel()
-                        return DiagnosticCommandResult(
-                            status = CommandStatus.COMMUNICATION_ERROR,
-                            isSuccess = false,
-                            requestHex = cleanCmd,
-                            statusText = "ELM327 error: $line"
-                        )
+                } else {
+                    // Category B: KWP2000 ECU Diagnostic Commands
+                    val serviceByteHex = if (cleanCmd.length >= 2) cleanCmd.substring(0, 2) else ""
+                    val expectedPosServiceHex = try {
+                        String.format("%02X", (serviceByteHex.toInt(16) + 0x40) and 0xFF)
+                    } catch (_: Exception) { "" }
+
+                    for (line in lines) {
+                        if (expectedPosServiceHex.isNotEmpty() && line.startsWith(expectedPosServiceHex)) {
+                            job.cancel()
+                            val t1Nanos = SystemClock.elapsedRealtimeNanos()
+                            return DiagnosticCommandResult(
+                                status = CommandStatus.ACKNOWLEDGED,
+                                isSuccess = true,
+                                requestHex = cleanCmd,
+                                responseHex = line,
+                                statusText = "ACKNOWLEDGED: ECU returned positive response $line",
+                                txStartNanos = t0Nanos,
+                                rxCompleteNanos = t1Nanos,
+                                totalRoundTripMs = (t1Nanos - t0Nanos) / 1_000_000.0
+                            )
+                        }
+                        if (line.startsWith("7F") && line.length >= 4 && line.substring(2, 4) == serviceByteHex) {
+                            job.cancel()
+                            val nrc = if (line.length >= 6) line.substring(4, 6) else null
+                            val t1Nanos = SystemClock.elapsedRealtimeNanos()
+                            return DiagnosticCommandResult(
+                                status = CommandStatus.NEGATIVE_RESPONSE,
+                                isSuccess = false,
+                                requestHex = cleanCmd,
+                                responseHex = line,
+                                statusText = "NEGATIVE_RESPONSE: ECU returned NRC $line",
+                                nrcCode = nrc,
+                                txStartNanos = t0Nanos,
+                                rxCompleteNanos = t1Nanos,
+                                totalRoundTripMs = (t1Nanos - t0Nanos) / 1_000_000.0
+                            )
+                        }
+                        if (line.contains("NODATA") || line.contains("CANERROR") || line.contains("BUSERROR")) {
+                            job.cancel()
+                            val t1Nanos = SystemClock.elapsedRealtimeNanos()
+                            return DiagnosticCommandResult(
+                                status = CommandStatus.COMMUNICATION_ERROR,
+                                isSuccess = false,
+                                requestHex = cleanCmd,
+                                statusText = "ELM327 bus error: $line",
+                                txStartNanos = t0Nanos,
+                                rxCompleteNanos = t1Nanos,
+                                totalRoundTripMs = (t1Nanos - t0Nanos) / 1_000_000.0
+                            )
+                        }
                     }
                 }
             }
@@ -692,13 +759,17 @@ open class BluetoothManager(private val context: Context? = null) : DiagnosticTr
         }
 
         job.cancel()
+        val t1Nanos = SystemClock.elapsedRealtimeNanos()
 
         if (commandTransmitted) {
             return DiagnosticCommandResult(
                 status = CommandStatus.TRANSMITTED,
                 isSuccess = false,
                 requestHex = cleanCmd,
-                statusText = "TRANSMITTED: Command written over Bluetooth, but no positive ECU ACK received"
+                statusText = "TRANSMITTED: Command written over Bluetooth, but no positive ECU ACK received",
+                txStartNanos = t0Nanos,
+                rxCompleteNanos = t1Nanos,
+                totalRoundTripMs = (t1Nanos - t0Nanos) / 1_000_000.0
             )
         }
 
@@ -706,7 +777,10 @@ open class BluetoothManager(private val context: Context? = null) : DiagnosticTr
             status = CommandStatus.TIMEOUT,
             isSuccess = false,
             requestHex = cleanCmd,
-            statusText = "TIMEOUT: No response within ${timeoutMs}ms"
+            statusText = "TIMEOUT: No response within ${timeoutMs}ms",
+            txStartNanos = t0Nanos,
+            rxCompleteNanos = t1Nanos,
+            totalRoundTripMs = (t1Nanos - t0Nanos) / 1_000_000.0
         )
     }
 

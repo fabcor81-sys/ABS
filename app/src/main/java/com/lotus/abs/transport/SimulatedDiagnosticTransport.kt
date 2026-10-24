@@ -29,32 +29,51 @@ class SimulatedDiagnosticTransport(
         executedCommandsList.clear()
     }
 
+    override fun canExecute(category: CommandCategory): Boolean {
+        if (!mockConnected) return false
+        return when (category) {
+            CommandCategory.READ_ONLY -> true
+            CommandCategory.ACTUATOR_CONTROL -> allowActuatorControl
+        }
+    }
+
     override suspend fun executeCommand(
         commandHex: String,
         category: CommandCategory,
         timeoutMs: Long
     ): DiagnosticCommandResult {
         val cleanCmd = commandHex.replace(" ", "").uppercase(Locale.US)
+        val t0Nanos = System.nanoTime()
 
         if (!mockConnected || mockResponseMode == ResponseMode.DISCONNECTED) {
+            val t1Nanos = System.nanoTime()
             return DiagnosticCommandResult(
                 status = CommandStatus.DISCONNECTED,
                 isSuccess = false,
                 requestHex = cleanCmd,
-                statusText = "Transport disconnected"
+                statusText = "Transport disconnected",
+                txStartNanos = t0Nanos,
+                rxCompleteNanos = t1Nanos,
+                totalRoundTripMs = (t1Nanos - t0Nanos) / 1_000_000.0
             )
         }
 
         if (category == CommandCategory.ACTUATOR_CONTROL && !allowActuatorControl) {
+            val t1Nanos = System.nanoTime()
             return DiagnosticCommandResult(
                 status = CommandStatus.BLOCKED_SAFETY_GUARD,
                 isSuccess = false,
                 requestHex = cleanCmd,
-                statusText = "Actuator control blocked by real hardware safety guard"
+                statusText = "Actuator control blocked by real hardware safety guard",
+                txStartNanos = t0Nanos,
+                rxCompleteNanos = t1Nanos,
+                totalRoundTripMs = (t1Nanos - t0Nanos) / 1_000_000.0
             )
         }
 
         executedCommandsList.add(Pair(cleanCmd, category))
+        val t1Nanos = System.nanoTime()
+        val durationMs = (t1Nanos - t0Nanos) / 1_000_000.0
 
         return when (mockResponseMode) {
             ResponseMode.ACKNOWLEDGED -> {
@@ -70,7 +89,10 @@ class SimulatedDiagnosticTransport(
                     isSuccess = true,
                     requestHex = cleanCmd,
                     responseHex = respPayload,
-                    statusText = "SUCCESS: Positive KWP2000 response $respPayload"
+                    statusText = "SUCCESS: Positive KWP2000 response $respPayload",
+                    txStartNanos = t0Nanos,
+                    rxCompleteNanos = t1Nanos,
+                    totalRoundTripMs = durationMs
                 )
             }
             ResponseMode.TRANSMITTED_NO_ACK -> {
@@ -78,7 +100,10 @@ class SimulatedDiagnosticTransport(
                     status = CommandStatus.TRANSMITTED,
                     isSuccess = false,
                     requestHex = cleanCmd,
-                    statusText = "TRANSMITTED: Command sent to stream, but no ECU ACK received"
+                    statusText = "TRANSMITTED: Command sent to stream, but no ECU ACK received",
+                    txStartNanos = t0Nanos,
+                    rxCompleteNanos = t1Nanos,
+                    totalRoundTripMs = durationMs
                 )
             }
             ResponseMode.NEGATIVE_RESPONSE -> {
@@ -88,7 +113,10 @@ class SimulatedDiagnosticTransport(
                     requestHex = cleanCmd,
                     responseHex = "7F${cleanCmd.take(2)}12",
                     statusText = "NEGATIVE_RESPONSE: NRC 12 (SubFunctionNotSupported)",
-                    nrcCode = "12"
+                    nrcCode = "12",
+                    txStartNanos = t0Nanos,
+                    rxCompleteNanos = t1Nanos,
+                    totalRoundTripMs = durationMs
                 )
             }
             ResponseMode.TIMEOUT -> {
@@ -96,7 +124,10 @@ class SimulatedDiagnosticTransport(
                     status = CommandStatus.TIMEOUT,
                     isSuccess = false,
                     requestHex = cleanCmd,
-                    statusText = "TIMEOUT: No ECU response within ${timeoutMs}ms"
+                    statusText = "TIMEOUT: No ECU response within ${timeoutMs}ms",
+                    txStartNanos = t0Nanos,
+                    rxCompleteNanos = t1Nanos,
+                    totalRoundTripMs = durationMs
                 )
             }
             ResponseMode.CORRUPT_CHECKSUM -> {
@@ -104,7 +135,10 @@ class SimulatedDiagnosticTransport(
                     status = CommandStatus.COMMUNICATION_ERROR,
                     isSuccess = false,
                     requestHex = cleanCmd,
-                    statusText = "CHECKSUM_ERROR: Corrupt frame received"
+                    statusText = "CHECKSUM_ERROR: Corrupt frame received",
+                    txStartNanos = t0Nanos,
+                    rxCompleteNanos = t1Nanos,
+                    totalRoundTripMs = durationMs
                 )
             }
             ResponseMode.COMMUNICATION_ERROR -> {
@@ -112,7 +146,10 @@ class SimulatedDiagnosticTransport(
                     status = CommandStatus.COMMUNICATION_ERROR,
                     isSuccess = false,
                     requestHex = cleanCmd,
-                    statusText = "COMMUNICATION_ERROR: I/O or framing error"
+                    statusText = "COMMUNICATION_ERROR: I/O or framing error",
+                    txStartNanos = t0Nanos,
+                    rxCompleteNanos = t1Nanos,
+                    totalRoundTripMs = durationMs
                 )
             }
             ResponseMode.DISCONNECTED -> {
@@ -121,7 +158,10 @@ class SimulatedDiagnosticTransport(
                     status = CommandStatus.DISCONNECTED,
                     isSuccess = false,
                     requestHex = cleanCmd,
-                    statusText = "DISCONNECTED: Hardware cable unattached"
+                    statusText = "DISCONNECTED: Hardware cable unattached",
+                    txStartNanos = t0Nanos,
+                    rxCompleteNanos = t1Nanos,
+                    totalRoundTripMs = durationMs
                 )
             }
         }
