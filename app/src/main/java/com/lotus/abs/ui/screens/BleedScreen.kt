@@ -32,6 +32,7 @@ import com.lotus.abs.ui.viewmodel.WheelLocation
 @Composable
 fun BleedScreen(viewModel: BleedViewModel) {
     val state by viewModel.state.collectAsState()
+    val terminalListState = rememberLazyListState()
 
     LaunchedEffect(state.terminalLog) {
         if (state.terminalLog.isNotEmpty()) {
@@ -46,15 +47,10 @@ fun BleedScreen(viewModel: BleedViewModel) {
             .padding(16.dp)
     ) {
         Text(
-            text = titleText,
+            text = "Service / Bleed",
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Text(
-            text = if (isSlowMode) "Modalità Slow (Pausa 3s tra comandi AT di setup)" else "Modalità Veloce (Setup ottimizzato ELM327)",
-            fontSize = 13.sp,
-            color = if (isSlowMode) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.padding(bottom = 12.dp)
         )
 

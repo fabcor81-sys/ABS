@@ -37,9 +37,6 @@ import androidx.navigation.compose.rememberNavController
 import com.lotus.abs.bluetooth.BluetoothManager
 import com.lotus.abs.data.database.LotusAbsDatabase
 import com.lotus.abs.ui.screens.BleedScreen
-import com.lotus.abs.ui.screens.BleedSlowScreen
-import com.lotus.abs.ui.screens.BleedingTestScreen
-import com.lotus.abs.ui.screens.BleedingTestSlowScreen
 import com.lotus.abs.ui.screens.ConnectionScreen
 import com.lotus.abs.ui.screens.DiagnosticsScreen
 import com.lotus.abs.ui.screens.HomeScreen
@@ -271,15 +268,6 @@ fun MainApp(
                 }
                 composable("bleed") {
                     BleedScreen(bleedViewModel)
-                }
-                composable("bleed_slow") {
-                    BleedSlowScreen(bleedViewModel)
-                }
-                composable("bleed_test") {
-                    BleedingTestScreen(bleedViewModel)
-                }
-                composable("bleed_test_slow") {
-                    BleedingTestSlowScreen(bleedViewModel)
                 }
             }
         }

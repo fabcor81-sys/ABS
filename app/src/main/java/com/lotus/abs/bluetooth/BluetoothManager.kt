@@ -18,6 +18,7 @@ import android.util.Log
 import com.lotus.abs.usb.Kwp2000KLineTransport
 import com.lotus.abs.usb.UsbDeviceItem
 import com.lotus.abs.usb.UsbKLineManager
+import com.lotus.abs.util.FileLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
