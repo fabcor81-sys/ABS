@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -23,6 +24,13 @@ import com.lotus.abs.ui.viewmodel.LiveDataViewModel
 @Composable
 fun LiveDataScreen(viewModel: LiveDataViewModel) {
     val state by viewModel.state.collectAsState()
+
+    // Automatically stop polling when user leaves LiveDataScreen
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.stopPolling()
+        }
+    }
 
     Column(
         modifier = Modifier

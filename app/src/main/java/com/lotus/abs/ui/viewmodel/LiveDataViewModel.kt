@@ -3,6 +3,7 @@ package com.lotus.abs.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lotus.abs.bluetooth.BluetoothManager
+import com.lotus.abs.util.FileLogger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -59,15 +60,24 @@ class LiveDataViewModel(
     }
 
     fun togglePolling() {
-        val currentlyPolling = _state.value.isPolling
-        _state.update { it.copy(isPolling = !currentlyPolling) }
-        if (!currentlyPolling) {
+        if (_state.value.isPolling) {
+            stopPolling()
+        } else {
+            _state.update { it.copy(isPolling = true) }
             startPolling()
+        }
+    }
+
+    fun stopPolling() {
+        if (_state.value.isPolling) {
+            _state.update { it.copy(isPolling = false) }
+            FileLogger.i("LiveDataViewModel", "Live Data polling stopped.")
         }
     }
 
     private fun startPolling() {
         viewModelScope.launch {
+            FileLogger.i("LiveDataViewModel", "Live Data polling started.")
             val commands = listOf(
                 "1A 80", "1A 91", "1A 92", "1A 94",
                 "21 30", "21 31", "21 32", "21 33", "21 34"
@@ -76,9 +86,9 @@ class LiveDataViewModel(
                 for (cmd in commands) {
                     if (!_state.value.isPolling) break
                     bluetoothManager.sendCommand(cmd)
-                    delay(300) 
+                    delay(300)
                 }
-                delay(1000) 
+                delay(1000)
             }
         }
     }

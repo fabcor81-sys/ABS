@@ -8,7 +8,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
@@ -38,6 +37,9 @@ import androidx.navigation.compose.rememberNavController
 import com.lotus.abs.bluetooth.BluetoothManager
 import com.lotus.abs.data.database.LotusAbsDatabase
 import com.lotus.abs.ui.screens.BleedScreen
+import com.lotus.abs.ui.screens.BleedSlowScreen
+import com.lotus.abs.ui.screens.BleedingTestScreen
+import com.lotus.abs.ui.screens.BleedingTestSlowScreen
 import com.lotus.abs.ui.screens.ConnectionScreen
 import com.lotus.abs.ui.screens.DiagnosticsScreen
 import com.lotus.abs.ui.screens.HomeScreen
@@ -68,6 +70,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Initialize file logger
+        com.lotus.abs.util.FileLogger.init(this)
+        com.lotus.abs.util.FileLogger.i("MainActivity", "Lotus ABS Application Started")
 
         // Initialize managers and viewmodels
         bluetoothManager = BluetoothManager(this)
@@ -138,7 +144,10 @@ fun MainApp(
         Triple("connection", "Device Connection", Icons.Default.Bluetooth),
         Triple("live_data", "Live Data", Icons.Default.Speed),
         Triple("dtc", "DTC Errors", Icons.Default.Warning),
-        Triple("bleed", "Bleed System", Icons.Default.Build)
+        Triple("bleed", "Bleed System (Fast)", Icons.Default.Build),
+        Triple("bleed_slow", "Bleed System (Slow)", Icons.Default.Build),
+        Triple("bleed_test", "Bleeding Test (Fast)", Icons.Default.Build),
+        Triple("bleed_test_slow", "Bleeding Test (Slow)", Icons.Default.Build)
     )
 
     ModalNavigationDrawer(
@@ -153,7 +162,7 @@ fun MainApp(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Image(
-                        painter = painterResource(id = R.drawable.lotus_logo),
+                        painter = painterResource(id = R.drawable.lotus_cars_logo),
                         contentDescription = "Lotus Logo",
                         modifier = Modifier.size(40.dp)
                     )
@@ -187,10 +196,13 @@ fun MainApp(
                         label = { Text(label, fontWeight = FontWeight.Bold) },
                         selected = currentRoute == route,
                         onClick = {
-                            navController.navigate(route) {
-                                popUpTo(navController.graph.startDestinationId) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
+                            if (currentRoute != route) {
+                                navController.navigate(route) {
+                                    popUpTo("home") {
+                                        inclusive = (route == "home")
+                                    }
+                                    launchSingleTop = true
+                                }
                             }
                             scope.launch { drawerState.close() }
                         },
@@ -259,6 +271,15 @@ fun MainApp(
                 }
                 composable("bleed") {
                     BleedScreen(bleedViewModel)
+                }
+                composable("bleed_slow") {
+                    BleedSlowScreen(bleedViewModel)
+                }
+                composable("bleed_test") {
+                    BleedingTestScreen(bleedViewModel)
+                }
+                composable("bleed_test_slow") {
+                    BleedingTestSlowScreen(bleedViewModel)
                 }
             }
         }

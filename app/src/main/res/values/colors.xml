@@ -57,6 +57,7 @@
     <color name="md_theme_dark_inverse_primary">#1f6feb</color>
 
     <!-- Custom -->
+    <color name="ic_launcher_background">#0F172A</color>
     <color name="success">#4caf50</color>
     <color name="warning">#ff9800</color>
     <color name="danger">#f44336</color>

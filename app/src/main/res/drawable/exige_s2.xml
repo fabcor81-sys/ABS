@@ -1,5 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="300dp" android:height="150dp" android:viewportWidth="300" android:viewportHeight="150">
-    <path android:fillColor="#111111" android:pathData="M0,0 h300 v150 h-300 z" />
-    <path android:fillColor="#FFFFCC00" android:pathData="M50,100 h200 v20 h-200 z" />
+    android:width="240dp"
+    android:height="360dp"
+    android:viewportWidth="240"
+    android:viewportHeight="360">
+
+    <!-- Outer Glow / Background Shadow -->
+    <path
+        android:fillColor="#0D1117"
+        android:pathData="M0,0 h240 v360 h-240 z" />
+
+    <!-- Lotus Exige S2 Car Body Outline (Top-Down Silhouette) -->
+    <!-- Main Body Chassis Outer Fill -->
+    <path
+        android:fillColor="#1E293B"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="2"
+        android:pathData="M120,20
+                          C140,22 165,30 172,45
+                          C178,58 182,75 180,95
+                          C178,110 188,125 194,145
+                          C200,165 202,190 196,215
+                          C190,235 180,250 182,270
+                          C184,288 188,300 180,315
+                          C170,328 145,335 120,335
+                          C95,335 70,328 60,315
+                          C52,300 56,288 58,270
+                          C60,250 50,235 44,215
+                          C38,190 40,165 46,145
+                          C52,125 62,110 60,95
+                          C58,75 62,58 68,45
+                          C75,30 100,22 120,20 Z" />
+
+    <!-- Front Splitter Accent -->
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M90,24 C105,22 135,22 150,24 L154,29 C135,26 105,26 86,29 Z"/>
+
+    <!-- Front Headlights (Exige Cat-Eye Lights) -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M80,38 C84,33 92,30 96,35 C92,42 86,48 80,45 Z
+                          M160,38 C156,33 148,30 144,35 C148,42 154,48 160,45 Z" />
+
+    <!-- Hood Ventilation Scoops -->
+    <path
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="1.5"
+        android:pathData="M100,50 L108,70 M140,50 L132,70 M120,48 L120,72" />
+
+    <!-- Windshield -->
+    <path
+        android:fillColor="#0F172A"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="2"
+        android:pathData="M80,90 C100,80 140,80 160,90 L168,130 C138,124 102,124 72,130 Z" />
+
+    <!-- Exige Roof Air Scoop (Intake) -->
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M112,115 C116,105 124,105 128,115 L126,175 L114,175 Z" />
+
+    <!-- Side Mirrors -->
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M52,105 C42,103 40,112 50,114 Z
+                          M188,105 C198,103 200,112 190,114 Z" />
+
+    <!-- Side Air Pods / Intakes -->
+    <path
+        android:fillColor="#0F172A"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="1.5"
+        android:pathData="M44,185 C48,165 52,150 56,165 C52,185 48,205 44,185 Z
+                          M196,185 C192,165 188,150 184,165 C188,185 192,205 196,185 Z" />
+
+    <!-- Engine Bay Rear Glass / Slats -->
+    <path
+        android:strokeColor="#64748B"
+        android:strokeWidth="2"
+        android:pathData="M80,180 L160,180 M84,200 L156,200 M88,220 L152,220 M92,240 L148,240 M96,260 L144,260" />
+
+    <!-- Exige Rear Wing / Spoiler -->
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M65,310 C100,314 140,314 175,310 L178,322 C140,326 100,326 62,322 Z" />
+
+    <!-- Front Left Wheel (FL) -->
+    <path
+        android:fillColor="#0284C7"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="2"
+        android:pathData="M24,65 h22 v45 h-22 z" />
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M31,78 h8 v19 h-8 z" />
+
+    <!-- Front Right Wheel (FR) -->
+    <path
+        android:fillColor="#0284C7"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="2"
+        android:pathData="M194,65 h22 v45 h-22 z" />
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M201,78 h8 v19 h-8 z" />
+
+    <!-- Rear Left Wheel (RL) -->
+    <path
+        android:fillColor="#0284C7"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="2"
+        android:pathData="M20,245 h24 v50 h-24 z" />
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M28,260 h8 v20 h-8 z" />
+
+    <!-- Rear Right Wheel (RR) -->
+    <path
+        android:fillColor="#0284C7"
+        android:strokeColor="#FFCC00"
+        android:strokeWidth="2"
+        android:pathData="M196,245 h24 v50 h-24 z" />
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M204,260 h8 v20 h-8 z" />
+
 </vector>
