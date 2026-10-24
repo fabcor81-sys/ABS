@@ -49,11 +49,15 @@ class ConnectionViewModel(
                     BluetoothManager.ConnectionState.CONNECTED -> {
                         _state.emit(
                             _state.value.copy(
-                                ecuInfo = "Connected to ELM327",
+                                ecuInfo = if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB)
+                                    "Connected to KKL 409.1 / EBC430"
+                                else "Connected to ELM327",
                                 isInitializing = false
                             )
                         )
-                        initializeELM327()
+                        if (bluetoothManager.activeTransport == BluetoothManager.Transport.BLUETOOTH) {
+                            initializeELM327()
+                        }
                     }
                     BluetoothManager.ConnectionState.DISCONNECTED -> {
                         _state.emit(_state.value.copy(ecuInfo = "Not Connected"))
