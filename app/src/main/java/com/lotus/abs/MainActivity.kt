@@ -141,10 +141,8 @@ fun MainApp(
         Triple("connection", "Device Connection", Icons.Default.Bluetooth),
         Triple("live_data", "Live Data", Icons.Default.Speed),
         Triple("dtc", "DTC Errors", Icons.Default.Warning),
-        Triple("bleed", "Bleed System (Fast)", Icons.Default.Build),
-        Triple("bleed_slow", "Bleed System (Slow)", Icons.Default.Build),
-        Triple("bleed_test", "Bleeding Test (Fast)", Icons.Default.Build),
-        Triple("bleed_test_slow", "Bleeding Test (Slow)", Icons.Default.Build)
+        Triple("bleed", "Spurgo TEST FAST", Icons.Default.Build),
+        Triple("bleed_slow", "Spurgo TEST SLOW", Icons.Default.Build)
     )
 
     ModalNavigationDrawer(
@@ -267,7 +265,10 @@ fun MainApp(
                     DiagnosticsScreen(diagnosticsViewModel)
                 }
                 composable("bleed") {
-                    BleedScreen(bleedViewModel)
+                    BleedScreen(bleedViewModel, isSlowMode = false)
+                }
+                composable("bleed_slow") {
+                    BleedScreen(bleedViewModel, isSlowMode = true)
                 }
             }
         }
