@@ -15,6 +15,9 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.lotus.abs.usb.Kwp2000KLineTransport
+import com.lotus.abs.usb.UsbDeviceItem
+import com.lotus.abs.usb.UsbKLineManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -23,12 +26,21 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
+import kotlinx.coroutines.CoroutineScope
 
 class BluetoothManager(private val context: Context) {
+
+    enum class Transport {
+        BLUETOOTH, USB
+    }
+    
+    var activeTransport = Transport.BLUETOOTH
     private val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
 
     // Classic Bluetooth
@@ -66,6 +78,9 @@ class BluetoothManager(private val context: Context) {
 
     private var deviceType: DeviceType = DeviceType.UNKNOWN
     private var listeningActive = false
+    
+    val usbManager = UsbKLineManager(context)
+    var kwpTransport: Kwp2000KLineTransport? = null
 
     enum class ConnectionState {
         DISCONNECTED, CONNECTING, CONNECTED, ERROR
@@ -159,6 +174,7 @@ class BluetoothManager(private val context: Context) {
     }
 
     suspend fun connectToDevice(device: BluetoothDevice) {
+        activeTransport = Transport.BLUETOOTH
         stopScan()
         withContext(Dispatchers.IO) {
             try {
@@ -186,6 +202,59 @@ class BluetoothManager(private val context: Context) {
                 Log.e("BluetoothManager", "Connection failed: ${e.message}")
                 _connectionState.emit(ConnectionState.ERROR)
                 disconnect()
+            }
+        }
+    }
+
+    suspend fun connectUsbDevice(usbDeviceItem: UsbDeviceItem) {
+        activeTransport = Transport.USB
+        _connectionState.emit(ConnectionState.CONNECTING)
+        
+        withContext(Dispatchers.IO) {
+            try {
+                val driver = usbManager.findUsbDriverForAddress(usbDeviceItem.address)
+                if (driver == null) {
+                    Log.e("BluetoothManager", "USB Driver not found")
+                    _connectionState.emit(ConnectionState.ERROR)
+                    return@withContext
+                }
+                
+                val port = driver.ports.firstOrNull()
+                if (port == null) {
+                    Log.e("BluetoothManager", "USB Port not found")
+                    _connectionState.emit(ConnectionState.ERROR)
+                    return@withContext
+                }
+                
+                val usbConnection = usbManager.usbManager?.openDevice(driver.device)
+                if (usbConnection == null) {
+                    Log.e("BluetoothManager", "Cannot open USB device. Permissions?")
+                    _connectionState.emit(ConnectionState.ERROR)
+                    return@withContext
+                }
+                
+                port.open(usbConnection)
+                
+                kwpTransport = Kwp2000KLineTransport(port)
+                kwpTransport?.openPort(10400)
+                
+                val initSuccess = kwpTransport?.performFastInit { logMsg ->
+                    Log.d("BluetoothManager", logMsg)
+                    CoroutineScope(Dispatchers.IO).launch {
+                        _receivedData.emit("[USB] $logMsg")
+                    }
+                }
+                
+                if (initSuccess == true) {
+                    _connectionState.emit(ConnectionState.CONNECTED)
+                    Log.d("BluetoothManager", "USB KWP2000 Connected")
+                } else {
+                    port.close()
+                    _connectionState.emit(ConnectionState.ERROR)
+                }
+            } catch (e: Exception) {
+                Log.e("BluetoothManager", "USB connection failed: ${e.message}")
+                _connectionState.emit(ConnectionState.ERROR)
             }
         }
     }
@@ -416,6 +485,21 @@ class BluetoothManager(private val context: Context) {
     suspend fun sendCommand(command: String) {
         withContext(Dispatchers.IO) {
             try {
+                if (activeTransport == Transport.USB) {
+                    val result = kwpTransport?.sendDiagnosticReadCommand(command) { logMsg ->
+                        Log.d("BluetoothManager", logMsg)
+                        CoroutineScope(Dispatchers.IO).launch {
+                            _receivedData.emit("[USB] $logMsg")
+                        }
+                    }
+                    if (result != null && result.isSuccess) {
+                        _receivedData.emit(result.payloadHex)
+                    } else {
+                        _receivedData.emit("ERROR")
+                    }
+                    return@withContext
+                }
+
                 when (deviceType) {
                     DeviceType.CLASSIC -> sendCommandClassic(command)
                     DeviceType.BLE -> sendCommandBLE(command)
@@ -512,21 +596,26 @@ class BluetoothManager(private val context: Context) {
         withContext(Dispatchers.IO) {
             try {
                 listeningActive = false
-
-                when (deviceType) {
-                    DeviceType.CLASSIC -> {
-                        inputStream?.close()
-                        outputStream?.close()
-                        bluetoothSocket?.close()
-                    }
-                    DeviceType.BLE -> {
-                        bluetoothGatt?.close()
-                        bluetoothGatt = null
-                    }
-                    else -> {
-                        bluetoothGatt?.close()
-                        bluetoothGatt = null
-                        bluetoothSocket?.close()
+                
+                if (activeTransport == Transport.USB) {
+                    kwpTransport?.close()
+                    kwpTransport = null
+                } else {
+                    when (deviceType) {
+                        DeviceType.CLASSIC -> {
+                            inputStream?.close()
+                            outputStream?.close()
+                            bluetoothSocket?.close()
+                        }
+                        DeviceType.BLE -> {
+                            bluetoothGatt?.close()
+                            bluetoothGatt = null
+                        }
+                        else -> {
+                            bluetoothGatt?.close()
+                            bluetoothGatt = null
+                            bluetoothSocket?.close()
+                        }
                     }
                 }
 

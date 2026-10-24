@@ -32,13 +32,19 @@ class BleedViewModel(
                 val cleaned = data.replace("\r", "")
                 responseBuffer += cleaned
 
-                if (responseBuffer.contains("\n") || responseBuffer.endsWith(">")) {
-                    val lines = responseBuffer.split("\n")
-                    for (line in lines) {
-                        val trimmed = line.trim()
-                        if (trimmed.isNotEmpty()) {
-                            addReceivedLog(trimmed)
-                        }
+                while (responseBuffer.contains("\n")) {
+                    val index = responseBuffer.indexOf("\n")
+                    val line = responseBuffer.substring(0, index).trim()
+                    if (line.isNotEmpty()) {
+                        addReceivedLog(line)
+                    }
+                    responseBuffer = responseBuffer.substring(index + 1)
+                }
+
+                if (responseBuffer.trim() == ">" || responseBuffer.endsWith(">")) {
+                    val trimmed = responseBuffer.trim()
+                    if (trimmed.isNotEmpty()) {
+                        addReceivedLog(trimmed)
                     }
                     responseBuffer = ""
                 }
@@ -50,22 +56,43 @@ class BleedViewModel(
         if (_state.value.activeOperation != null) return
 
         viewModelScope.launch {
-            _state.update { it.copy(activeOperation = name, timeRemainingSec = durationSec) }
-            addSystemLog("Starting $name sequence...")
+            try {
+                _state.update { it.copy(activeOperation = name, timeRemainingSec = durationSec) }
+                addSystemLog("Starting $name sequence...")
 
-            addSentLog(onCommand)
-            bluetoothManager.sendCommand(onCommand)
+                addSentLog(onCommand)
+                bluetoothManager.sendCommand(onCommand)
 
-            for (i in durationSec downTo 1) {
-                _state.update { it.copy(timeRemainingSec = i) }
-                delay(1000)
+                for (i in durationSec downTo 1) {
+                    _state.update { it.copy(timeRemainingSec = i) }
+                    delay(1000)
+                }
+            } finally {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    addSystemLog("Stopping all components...")
+                    
+                    // Spegniamo la valvola/comando specifico usato
+                    addSentLog(offCommand)
+                    bluetoothManager.sendCommand(offCommand)
+                    
+                    // Piccolo buffer per l'ELM327
+                    delay(200)
+                    
+                    // Spegnimento forzato Pompa
+                    addSentLog("30 02 07 00")
+                    bluetoothManager.sendCommand("30 02 07 00")
+                    
+                    // Piccolo buffer
+                    delay(200)
+                    
+                    // Spegnimento forzato Relè Valvole
+                    addSentLog("30 03 07 00")
+                    bluetoothManager.sendCommand("30 03 07 00")
+                    
+                    addSystemLog("Finished $name sequence.")
+                    _state.update { it.copy(activeOperation = null, timeRemainingSec = 0) }
+                }
             }
-
-            addSentLog(offCommand)
-            bluetoothManager.sendCommand(offCommand)
-
-            addSystemLog("Finished $name sequence.")
-            _state.update { it.copy(activeOperation = null, timeRemainingSec = 0) }
         }
     }
     

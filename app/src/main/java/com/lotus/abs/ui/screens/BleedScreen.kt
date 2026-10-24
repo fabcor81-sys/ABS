@@ -26,7 +26,7 @@ fun BleedScreen(viewModel: BleedViewModel) {
     val state by viewModel.state.collectAsState()
     val terminalListState = rememberLazyListState()
 
-    LaunchedEffect(state.terminalLog.size) {
+    LaunchedEffect(state.terminalLog) {
         if (state.terminalLog.isNotEmpty()) {
             terminalListState.animateScrollToItem(state.terminalLog.size - 1)
         }

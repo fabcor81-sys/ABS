@@ -39,7 +39,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
     val terminalListState = rememberLazyListState()
 
     // Auto-scroll terminal log to bottom when new entries arrive
-    LaunchedEffect(state.terminalLog.size) {
+    LaunchedEffect(state.terminalLog) {
         if (state.terminalLog.isNotEmpty()) {
             terminalListState.animateScrollToItem(state.terminalLog.size - 1)
         }

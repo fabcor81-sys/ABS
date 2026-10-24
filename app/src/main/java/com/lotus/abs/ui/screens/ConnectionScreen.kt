@@ -62,6 +62,29 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
             }
         }
 
+        // Transport Selection (Only show when disconnected)
+        if (state.connectionStatus == BluetoothManager.ConnectionState.DISCONNECTED) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = state.selectedTransport == com.lotus.abs.ui.viewmodel.TransportType.BLUETOOTH,
+                    onClick = { viewModel.setTransport(com.lotus.abs.ui.viewmodel.TransportType.BLUETOOTH) },
+                    label = { Text("Bluetooth ELM327") },
+                    modifier = Modifier.weight(1f)
+                )
+                FilterChip(
+                    selected = state.selectedTransport == com.lotus.abs.ui.viewmodel.TransportType.USB,
+                    onClick = { viewModel.setTransport(com.lotus.abs.ui.viewmodel.TransportType.USB) },
+                    label = { Text("USB KKL 409.1") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
         // Connection Status Card
         ConnectionStatusCard(state)
         Spacer(modifier = Modifier.height(16.dp))
@@ -91,67 +114,101 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                 }
             }
 
-            val pairedAddresses = state.pairedDevices.map { it.address }.toSet()
-            val unpairScannedDevices = state.scannedDevices.filter { it.address !in pairedAddresses }
-
-            if (state.pairedDevices.isEmpty() && unpairScannedDevices.isEmpty()) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Text(
-                        if (state.isScanning) "Scanning for nearby BLE & Bluetooth devices..." else "No devices found. Tap 'Scan for Devices' below.",
-                        modifier = Modifier.padding(16.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if (unpairScannedDevices.isNotEmpty()) {
-                        item {
-                            Text(
-                                "Discovered BLE Devices",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-                        }
-                        items(unpairScannedDevices) { device ->
-                            DeviceCard(
-                                device = device,
-                                badgeText = "BLE",
-                                onClick = { viewModel.connect(device) },
+            if (state.selectedTransport == com.lotus.abs.ui.viewmodel.TransportType.USB) {
+                if (state.usbDevices.isEmpty()) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Text(
+                            "No USB devices found. Connect VAG-COM KKL cable.",
+                            modifier = Modifier.padding(16.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        items(state.usbDevices, key = { it.address }) { device ->
+                            Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
-                            )
+                                    .clickable { viewModel.connectUsb(device) },
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(device.name, fontWeight = FontWeight.Bold)
+                                    Text(device.address, fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
+                }
+            } else {
+                val pairedAddresses = state.pairedDevices.map { it.address }.toSet()
+                val unpairScannedDevices = state.scannedDevices.filter { it.address !in pairedAddresses }
 
-                    if (state.pairedDevices.isNotEmpty()) {
-                        item {
-                            Text(
-                                "Paired Devices",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                if (state.pairedDevices.isEmpty() && unpairScannedDevices.isEmpty()) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Text(
+                            if (state.isScanning) "Scanning for nearby BLE & Bluetooth devices..." else "No devices found. Tap 'Scan for Devices' below.",
+                            modifier = Modifier.padding(16.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (unpairScannedDevices.isNotEmpty()) {
+                            item {
+                                Text(
+                                    "Discovered BLE Devices",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            }
+                            items(unpairScannedDevices) { device ->
+                                DeviceCard(
+                                    device = device,
+                                    badgeText = "BLE",
+                                    onClick = { viewModel.connect(device) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                )
+                            }
                         }
-                        items(state.pairedDevices) { device ->
-                            DeviceCard(
-                                device = device,
-                                badgeText = "Paired",
-                                onClick = { viewModel.connect(device) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
-                            )
+
+                        if (state.pairedDevices.isNotEmpty()) {
+                            item {
+                                Text(
+                                    "Paired Devices",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            }
+                            items(state.pairedDevices) { device ->
+                                DeviceCard(
+                                    device = device,
+                                    badgeText = "Paired",
+                                    onClick = { viewModel.connect(device) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                )
+                            }
                         }
                     }
                 }

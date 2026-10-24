@@ -4,18 +4,24 @@ import android.bluetooth.BluetoothDevice
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lotus.abs.bluetooth.BluetoothManager
+import com.lotus.abs.usb.UsbDeviceItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
+enum class TransportType { BLUETOOTH, USB }
+
 data class ConnectionScreenState(
     val connectionStatus: BluetoothManager.ConnectionState = BluetoothManager.ConnectionState.DISCONNECTED,
+    val selectedTransport: TransportType = TransportType.BLUETOOTH,
     val pairedDevices: List<BluetoothDevice> = emptyList(),
     val scannedDevices: List<BluetoothDevice> = emptyList(),
+    val usbDevices: List<UsbDeviceItem> = emptyList(),
     val isScanning: Boolean = false,
     val batteryVoltage: Float = 0f,
     val selectedDevice: BluetoothDevice? = null,
+    val selectedUsbDevice: UsbDeviceItem? = null,
     val ecuInfo: String = "Not Connected",
     val isInitializing: Boolean = false
 )
@@ -76,17 +82,37 @@ class ConnectionViewModel(
         }
     }
 
-    private fun loadPairedDevices() {
-        val devices = bluetoothManager.getPairedDevices()
-        _state.tryEmit(_state.value.copy(pairedDevices = devices))
+    fun loadPairedDevices() {
+        if (_state.value.selectedTransport == TransportType.USB) {
+            val usbDevices = bluetoothManager.usbManager.getConnectedUsbDevices()
+            _state.tryEmit(_state.value.copy(usbDevices = usbDevices))
+        } else {
+            val devices = bluetoothManager.getPairedDevices()
+            _state.tryEmit(_state.value.copy(pairedDevices = devices))
+        }
+    }
+    
+    fun refreshDeviceList() {
+        loadPairedDevices()
     }
 
     fun startScan() {
-        bluetoothManager.startScan()
+        if (_state.value.selectedTransport == TransportType.USB) {
+            refreshDeviceList()
+        } else {
+            bluetoothManager.startScan()
+        }
     }
 
     fun stopScan() {
-        bluetoothManager.stopScan()
+        if (_state.value.selectedTransport != TransportType.USB) {
+            bluetoothManager.stopScan()
+        }
+    }
+    
+    fun setTransport(transport: TransportType) {
+        _state.value = _state.value.copy(selectedTransport = transport)
+        refreshDeviceList()
     }
 
     fun connect(device: BluetoothDevice) {
@@ -94,6 +120,13 @@ class ConnectionViewModel(
             bluetoothManager.stopScan()
             _state.emit(_state.value.copy(selectedDevice = device, isInitializing = true))
             bluetoothManager.connectToDevice(device)
+        }
+    }
+    
+    fun connectUsb(device: UsbDeviceItem) {
+        viewModelScope.launch {
+            _state.emit(_state.value.copy(selectedUsbDevice = device, isInitializing = true))
+            bluetoothManager.connectUsbDevice(device)
         }
     }
 
@@ -132,8 +165,4 @@ class ConnectionViewModel(
         _state.tryEmit(_state.value.copy(batteryVoltage = voltage))
     }
 
-    fun refreshDeviceList() {
-        loadPairedDevices()
-        startScan()
-    }
 }

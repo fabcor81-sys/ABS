@@ -71,34 +71,32 @@ class DiagnosticsViewModel(
 
     private fun observeBluetoothData() {
         viewModelScope.launch {
-            // Buffer to hold partial lines
             var responseBuffer = ""
 
             bluetoothManager.receivedData.collect { data ->
                 val cleaned = data.replace("\r", "")
                 responseBuffer += cleaned
 
-                // Check if buffer contains a newline or prompt char
-                if (responseBuffer.contains("\n") || responseBuffer.endsWith(">")) {
-                    // We split by newline, handle any prompt >
-                    val lines = responseBuffer.split("\n")
-                    for (i in lines.indices) {
-                        val line = lines[i].trim()
-                        if (line.isNotEmpty()) {
-                            // If this is the last line and it's just ">", append it to previous log or output on its own
-                            if (i == lines.lastIndex && line == ">" && lines.size > 1) {
-                                // Add to previous line if possible, or just emit ">"
-                                addReceivedLog(line)
-                            } else {
-                                addReceivedLog(line)
-                            }
-                        }
+                while (responseBuffer.contains("\n")) {
+                    val index = responseBuffer.indexOf("\n")
+                    val line = responseBuffer.substring(0, index).trim()
+                    if (line.isNotEmpty()) {
+                        addReceivedLog(line)
+                        parseDTCResponse(line)
                     }
-                    // clear buffer after processing
+                    responseBuffer = responseBuffer.substring(index + 1)
+                }
+
+                if (responseBuffer.trim() == ">" || responseBuffer.endsWith(">")) {
+                    val trimmed = responseBuffer.trim()
+                    if (trimmed.isNotEmpty() && trimmed != ">") {
+                        addReceivedLog(trimmed)
+                        parseDTCResponse(trimmed)
+                    } else if (trimmed == ">") {
+                        addReceivedLog(trimmed)
+                    }
                     responseBuffer = ""
                 }
-                
-                parseDTCResponse(data)
             }
         }
     }
