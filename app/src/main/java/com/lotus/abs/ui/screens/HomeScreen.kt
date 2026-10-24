@@ -126,7 +126,7 @@ fun HomeScreen(navController: NavController) {
                 icon = Icons.Default.Build,
                 modifier = Modifier.fillMaxWidth().height(80.dp),
                 isHorizontal = true
-            ) { navController.navigate("bleed_test") }
+            ) { navController.navigate("bleed") }
         }
     }
 }
