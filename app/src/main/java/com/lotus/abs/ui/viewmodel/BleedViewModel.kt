@@ -466,7 +466,13 @@ class BleedViewModel(
     }
 
     fun runWheelBleedPulseTestMacro(wheel: WheelLocation) {
-        if (_state.value.isRunningSequence || checkStopRequested()) return
+        if (_state.value.isRunningSequence || checkStopRequested() ||
+            _state.value.executionState in setOf(
+                BleedExecState.STOP_UNCONFIRMED,
+                BleedExecState.ERROR,
+                BleedExecState.COMPLETED_UNVERIFIED
+            )
+        ) return
 
         activeJob = viewModelScope.launch {
             // Non-invasive capability check (sends 0 bytes to ECU)
@@ -558,7 +564,13 @@ class BleedViewModel(
     }
 
     fun runWheelBleedPulseTestMacroSlow(wheel: WheelLocation) {
-        if (_state.value.isRunningSequence || checkStopRequested()) return
+        if (_state.value.isRunningSequence || checkStopRequested() ||
+            _state.value.executionState in setOf(
+                BleedExecState.STOP_UNCONFIRMED,
+                BleedExecState.ERROR,
+                BleedExecState.COMPLETED_UNVERIFIED
+            )
+        ) return
 
         activeJob = viewModelScope.launch {
             // Non-invasive capability check (sends 0 bytes to ECU)
@@ -671,7 +683,13 @@ class BleedViewModel(
             addSystemLog("Actuator control disabled or adapter disconnected.")
             return
         }
-        if (_state.value.isRunningSequence || checkStopRequested()) return
+        if (_state.value.isRunningSequence || checkStopRequested() ||
+            _state.value.executionState in setOf(
+                BleedExecState.STOP_UNCONFIRMED,
+                BleedExecState.ERROR,
+                BleedExecState.COMPLETED_UNVERIFIED
+            )
+        ) return
         val wheel = _state.value.selectedWheel
 
         activeJob = viewModelScope.launch {
