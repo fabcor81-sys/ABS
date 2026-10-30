@@ -235,7 +235,7 @@ fun MainApp(
                                 onClick = { navigateTo("home") },
                                 enabled = !operationActive
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Torna alla Home")
+                                Icon(Icons.Default.Home, contentDescription = "Torna alla Home")
                             }
                         }
                     },
