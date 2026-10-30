@@ -148,7 +148,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 
                         Button(
                             onClick = { confirmClear = true },
-                            enabled = connected && !state.isSending,
+                            enabled = state.canClearDtc && !state.isSending,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.error,
                                 contentColor = Color.White
@@ -169,6 +169,13 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                     }
                 }
             }
+        }
+
+        if (connected && !state.canClearDtc) {
+            Text("Il trasporto USB KKL attuale è in sola lettura: cancellazione DTC disabilitata.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 10.dp))
         }
 
         // Section 2: Terminal Window
