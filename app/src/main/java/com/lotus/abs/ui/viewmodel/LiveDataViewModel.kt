@@ -25,7 +25,7 @@ data class LiveDataState(
     val speedRR: String = "--",
     val isPolling: Boolean = false,
     val isConnected: Boolean = false,
-    val lastUpdated: String = "Nessuna lettura"
+    val lastUpdated: String = "No readings yet"
 )
 
 class LiveDataViewModel(
@@ -113,30 +113,30 @@ class LiveDataViewModel(
 
     private fun extractValue(rawLine: String, prefix: String): String {
         val payload = rawLine.substringAfter(prefix, "")
-        if (payload.isEmpty()) return "Non supportato"
+        if (payload.isEmpty()) return "Not supported"
         return payload
     }
 
     private fun extractVoltage(rawLine: String, prefix: String = "6130"): String {
         val payload = rawLine.substringAfter(prefix, "")
-        if (payload.isEmpty() || payload.length < 2) return "Non supportato"
+        if (payload.isEmpty() || payload.length < 2) return "Not supported"
         return try {
             val valByte = payload.substring(0, 2).toInt(16)
             val volts = valByte * 0.1f
             String.format(java.util.Locale.US, "%.1f", volts)
         } catch (_: Exception) {
-            "Non supportato"
+            "Not supported"
         }
     }
 
     private fun extractSpeed(rawLine: String, prefix: String): String {
         val payload = rawLine.substringAfter(prefix, "")
-        if (payload.isEmpty() || payload.length < 2) return "Non supportato"
+        if (payload.isEmpty() || payload.length < 2) return "Not supported"
         return try {
             val valByte = payload.substring(0, 2).toInt(16)
             "$valByte"
         } catch (_: Exception) {
-            "Non supportato"
+            "Not supported"
         }
     }
 
