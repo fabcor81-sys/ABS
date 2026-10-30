@@ -261,7 +261,7 @@ private fun WheelDetailScreen(
     if (confirmStart) {
         AlertDialog(
             onDismissRequest = { confirmStart = false },
-            title = { Text("Pre-start hydraulic checklist") },
+            title = { Text("EXPERIMENTAL PROCEDURE — Safety notice") },
             text = {
                 Column(
                     modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -291,9 +291,17 @@ private fun WheelDetailScreen(
                             "This experimental single-wheel routine is NOT a validated substitute.",
                         color = MaterialTheme.colorScheme.error, fontSize = 12.sp
                     )
+                    Text(
+                        "USE AT YOUR OWN RISK. No warranty is provided. The developers and " +
+                            "contributors disclaim liability for damage, personal injury or " +
+                            "loss to the maximum extent permitted by applicable law.",
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = experimentalAcknowledged, onCheckedChange = { experimentalAcknowledged = it })
-                        Text("I understand the single-wheel procedure and 5-second pump recovery are experimental.", fontSize = 13.sp)
+                        Text("I understand this routine is experimental, not Lotus-approved, and used at my own risk.", fontSize = 13.sp)
                     }
                     Text(
                         "6 ISO pulses (300 ms ON / 300 ms OFF), followed by 5 s of pump recovery. " +
@@ -352,16 +360,17 @@ private fun WheelDetailScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                     ) {
                         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("BEFORE STARTING THE BLEED CYCLE", fontWeight = FontWeight.Black, color = LotusYellow)
+                            Text("EXPERIMENTAL PROCEDURE — NOT LOTUS-APPROVED", fontWeight = FontWeight.Black, color = LotusYellow)
                             Text(
-                                "Prepare the brake circuit using a suitable low-pressure bleeding method. " +
-                                    "Check fluid level; open the bleed nipple on wheel ${wheel.shortName} " +
-                                    "and attach the collection hose before activating the ABS.",
+                                "This single-wheel ABS bleeding routine is experimental and has not been " +
+                                    "validated as equivalent to the official Lotus Scan procedure. " +
+                                    "Use at your own risk.",
                                 fontSize = 13.sp
                             )
                             Text(
-                                "The official Lotus Scan procedure opens all four nipples; this one-wheel " +
-                                    "routine is experimental. A mandatory checklist appears when you press START.",
+                                "No warranty is provided. The developers and contributors disclaim liability " +
+                                    "for damage, injury or loss to the maximum extent permitted by applicable law. " +
+                                    "A pre-start checklist is required before any actuator command.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
                             )
                         }
