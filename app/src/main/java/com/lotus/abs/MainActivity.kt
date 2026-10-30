@@ -147,15 +147,15 @@ fun MainApp(
 
     val menuItems = listOf(
         Triple("home", "Home", Icons.Default.Home),
-        Triple("connection", "Connessione", Icons.Default.Bluetooth),
-        Triple("live_data", "Dati live", Icons.Default.Speed),
-        Triple("dtc", "Diagnostica DTC", Icons.Default.Warning),
-        Triple("bleed", "Spurgo ABS", Icons.Default.Build)
+        Triple("connection", "Connection", Icons.Default.Bluetooth),
+        Triple("live_data", "Live Data", Icons.Default.Speed),
+        Triple("dtc", "DTC Diagnostics", Icons.Default.Warning),
+        Triple("bleed", "ABS Bleeding", Icons.Default.Build)
     )
 
     val navigateTo: (String) -> Unit = { destination ->
         if (operationActive && destination != route) {
-            scope.launch { snackbar.showSnackbar("Macro attiva: usa STOP prima di cambiare schermata") }
+            scope.launch { snackbar.showSnackbar("Bleeding routine active. Press EMERGENCY STOP before switching screens.") }
         } else if (destination == route) {
             if (destination == "bleed" && !operationActive) bleedViewModel.selectWheel(null)
         } else {
@@ -177,7 +177,7 @@ fun MainApp(
     // Guard system Back while any actuator routine is active. The nested
     // wheel-detail BackHandler handles its own disabled Back path as well.
     BackHandler(enabled = operationActive) {
-        scope.launch { snackbar.showSnackbar("Operazione ABS attiva: premi STOP EMERGENZA prima di uscire") }
+        scope.launch { snackbar.showSnackbar("ABS operation active. Press EMERGENCY STOP before leaving.") }
     }
 
     ModalNavigationDrawer(
@@ -228,14 +228,14 @@ fun MainApp(
                     navigationIcon = {
                         if (route == "home") {
                             IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Default.Menu, contentDescription = "Apri menu")
+                                Icon(Icons.Default.Menu, contentDescription = "Open navigation menu")
                             }
                         } else {
                             IconButton(
                                 onClick = { navigateTo("home") },
                                 enabled = !operationActive
                             ) {
-                                Icon(Icons.Default.Home, contentDescription = "Torna alla Home")
+                                Icon(Icons.Default.Home, contentDescription = "Return to Home")
                             }
                         }
                     },
@@ -245,7 +245,7 @@ fun MainApp(
                                 onClick = { scope.launch { drawerState.open() } },
                                 enabled = !operationActive
                             ) {
-                                Icon(Icons.Default.Menu, contentDescription = "Apri menu")
+                                Icon(Icons.Default.Menu, contentDescription = "Open navigation menu")
                             }
                         }
                     },
