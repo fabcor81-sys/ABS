@@ -108,17 +108,17 @@ fun HomeScreen(onNavigate: (String) -> Unit, isConnected: Boolean, connectionTyp
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        if (isConnected) "Adattatore collegato" else "Adattatore scollegato",
+                        if (isConnected) "Adapter connected" else "Adapter disconnected",
                         color = if (isConnected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        if (isConnected) connectionType else "Collega un dispositivo per utilizzare le funzioni ABS",
+                        if (isConnected) connectionType else "Connect an adapter to access ABS functions",
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 TextButton(onClick = { onNavigate("connection") }) {
-                    Text(if (isConnected) "Gestisci" else "Connetti")
+                    Text(if (isConnected) "Manage" else "Connect")
                 }
             }
         }
@@ -130,16 +130,16 @@ fun HomeScreen(onNavigate: (String) -> Unit, isConnected: Boolean, connectionTyp
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            HomeCard(title = "CONNESSIONE", icon = Icons.Default.Bluetooth, modifier = Modifier.weight(1f)) { onNavigate("connection") }
-            HomeCard(title = "DATI LIVE", icon = Icons.Default.Speed, modifier = Modifier.weight(1f)) { onNavigate("live_data") }
+            HomeCard(title = "CONNECTION", icon = Icons.Default.Bluetooth, modifier = Modifier.weight(1f)) { onNavigate("connection") }
+            HomeCard(title = "LIVE DATA", icon = Icons.Default.Speed, modifier = Modifier.weight(1f)) { onNavigate("live_data") }
         }
         Spacer(modifier = Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            HomeCard(title = "ERRORI DTC", icon = Icons.Default.Warning, modifier = Modifier.weight(1f)) { onNavigate("dtc") }
-            HomeCard(title = "SPURGO ABS", icon = Icons.Default.Build, modifier = Modifier.weight(1f)) { onNavigate("bleed") }
+            HomeCard(title = "DTC ERRORS", icon = Icons.Default.Warning, modifier = Modifier.weight(1f)) { onNavigate("dtc") }
+            HomeCard(title = "ABS BLEEDING", icon = Icons.Default.Build, modifier = Modifier.weight(1f)) { onNavigate("bleed") }
         }
 
     }
