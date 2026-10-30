@@ -133,19 +133,19 @@ private fun BleedSetupScreen(
             }
         }
 
-        Text("2. Modalità", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text("2. Inizializzazione adattatore", fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             FilterChip(
                 selected = !state.slowMode, onClick = { onChooseMode(false) },
-                label = { Text("FAST") }, modifier = Modifier.weight(1f)
+                label = { Text("FAST INIT") }, modifier = Modifier.weight(1f)
             )
             FilterChip(
                 selected = state.slowMode, onClick = { onChooseMode(true) },
-                label = { Text("SLOW") }, modifier = Modifier.weight(1f)
+                label = { Text("SLOW INIT") }, modifier = Modifier.weight(1f)
             )
         }
         Text(
-            "FAST e SLOW hanno gli stessi cicli idraulici: cambia l'inizializzazione della connessione.",
+            "FAST INIT: pause di inizializzazione più brevi. SLOW INIT: pause di inizializzazione più lunghe. Entrambe eseguono gli stessi sei cicli ISO e lo stesso recupero pompa.",
             color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
         )
         Button(
@@ -210,7 +210,7 @@ private fun WheelDetailScreen(
     var manualRequest by remember { mutableStateOf<String?>(null) }
     var confirmAcknowledge by remember { mutableStateOf(false) }
     val requiresReview = state.executionState in setOf(BleedExecState.ERROR, BleedExecState.STOP_UNCONFIRMED, BleedExecState.COMPLETED_UNVERIFIED)
-    val mode = if (state.slowMode) "SLOW" else "FAST"
+    val mode = if (state.slowMode) "SLOW INIT" else "FAST INIT"
 
     val attemptBack = {
         if (busy) Toast.makeText(context, "Arresta prima la macro per tornare indietro", Toast.LENGTH_SHORT).show()
@@ -260,7 +260,7 @@ private fun WheelDetailScreen(
             title = { Text("Conferma procedura ABS") },
             text = {
                 Text(
-                    "Ruota: ${wheel.shortName} • Modalità: $mode\n" +
+                    "Ruota: ${wheel.shortName} • Inizializzazione: $mode\n" +
                     "6 cicli ISO da 300/300 ms; poi riposo valvole e pompa ON per 5 s.\n\n" +
                     "Verifica livello liquido, spurgo e condizioni di lavoro. " +
                     "I 5 secondi sono sperimentali, non prescritti dal manuale Lotus."
