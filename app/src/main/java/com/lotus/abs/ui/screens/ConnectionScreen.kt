@@ -214,10 +214,11 @@ fun ConnectionScreen(viewModel: ConnectionViewModel, onBleed: () -> Unit) {
                 }
                 Button(
                     onClick = onBleed,
+                    enabled = !state.isInitializing,
                     modifier = Modifier.weight(1f).height(48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary)
-                ) { Text("Vai allo spurgo", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                ) { Text(if (state.isInitializing) "Inizializzazione..." else "Vai allo spurgo", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             } else if (state.connectionStatus == BluetoothManager.ConnectionState.ERROR) {
                 Button(
                     onClick = { viewModel.disconnect() },
