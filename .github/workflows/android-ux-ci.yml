@@ -2,9 +2,10 @@ name: Android UX / Navigation checks
 
 on:
   pull_request:
-  push:
-    branches:
-      - fix/post-pulse-pump-recovery-5s
+
+concurrency:
+  group: android-ux-bleeding-pr
+  cancel-in-progress: true
 
 jobs:
   build-and-unit-test:
