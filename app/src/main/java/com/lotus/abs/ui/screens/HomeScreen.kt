@@ -27,12 +27,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.navigation.NavController
 import com.lotus.abs.R
 import com.lotus.abs.ui.theme.LotusYellow
 
 @Composable
-fun HomeScreen(navController: NavController) {
+fun HomeScreen(onNavigate: (String) -> Unit, isConnected: Boolean, connectionType: String) {
     val scrollState = rememberScrollState()
 
     Column(
@@ -99,35 +98,50 @@ fun HomeScreen(navController: NavController) {
             )
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (isConnected) "Adattatore collegato" else "Adattatore scollegato",
+                        color = if (isConnected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        if (isConnected) connectionType else "Collega un dispositivo per utilizzare le funzioni ABS",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(onClick = { onNavigate("connection") }) {
+                    Text(if (isConnected) "Gestisci" else "Connetti")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Navigation Grid
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            HomeCard(title = "DEVICE\nCONNECTION", icon = Icons.Default.Bluetooth, modifier = Modifier.weight(1f)) { navController.navigate("connection") }
-            HomeCard(title = "LIVE\nDATA", icon = Icons.Default.Speed, modifier = Modifier.weight(1f)) { navController.navigate("live_data") }
+            HomeCard(title = "CONNESSIONE", icon = Icons.Default.Bluetooth, modifier = Modifier.weight(1f)) { onNavigate("connection") }
+            HomeCard(title = "DATI LIVE", icon = Icons.Default.Speed, modifier = Modifier.weight(1f)) { onNavigate("live_data") }
         }
         Spacer(modifier = Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            HomeCard(title = "DTC\nERRORS", icon = Icons.Default.Warning, modifier = Modifier.weight(1f)) { navController.navigate("dtc") }
-            HomeCard(title = "BLEED\nSYSTEM", icon = Icons.Default.Build, modifier = Modifier.weight(1f)) { navController.navigate("bleed") }
+            HomeCard(title = "ERRORI DTC", icon = Icons.Default.Warning, modifier = Modifier.weight(1f)) { onNavigate("dtc") }
+            HomeCard(title = "SPURGO ABS", icon = Icons.Default.Build, modifier = Modifier.weight(1f)) { onNavigate("bleed") }
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            HomeCard(
-                title = "BLEEDING TEST (PULSAZIONE IDRAULICA)",
-                icon = Icons.Default.Build,
-                modifier = Modifier.fillMaxWidth().height(80.dp),
-                isHorizontal = true
-            ) { navController.navigate("bleed") }
-        }
+
     }
 }
 
