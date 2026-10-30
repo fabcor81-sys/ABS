@@ -23,7 +23,8 @@ data class ConnectionScreenState(
     val selectedDevice: BluetoothDevice? = null,
     val selectedUsbDevice: UsbDeviceItem? = null,
     val ecuInfo: String = "Not Connected",
-    val isInitializing: Boolean = false
+    val isInitializing: Boolean = false,
+    val initializationError: Boolean = false
 )
 
 class ConnectionViewModel(
@@ -52,7 +53,8 @@ class ConnectionViewModel(
                                 ecuInfo = if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB)
                                     "USB KKL 409.1: sessione collegata (identificazione ECU non verificata)"
                                 else "ELM327 collegato (identificazione ECU non verificata)",
-                                isInitializing = bluetoothManager.activeTransport == BluetoothManager.Transport.BLUETOOTH
+                                isInitializing = bluetoothManager.activeTransport == BluetoothManager.Transport.BLUETOOTH,
+                                initializationError = false
                             )
                         )
                         if (bluetoothManager.activeTransport == BluetoothManager.Transport.BLUETOOTH) {
@@ -60,13 +62,13 @@ class ConnectionViewModel(
                         }
                     }
                     BluetoothManager.ConnectionState.DISCONNECTED -> {
-                        _state.emit(_state.value.copy(ecuInfo = "Not Connected"))
+                        _state.emit(_state.value.copy(ecuInfo = "Not Connected", isInitializing = false, initializationError = false))
                     }
                     BluetoothManager.ConnectionState.CONNECTING -> {
-                        _state.emit(_state.value.copy(isInitializing = true))
+                        _state.emit(_state.value.copy(isInitializing = true, initializationError = false))
                     }
                     BluetoothManager.ConnectionState.ERROR -> {
-                        _state.emit(_state.value.copy(ecuInfo = "Connection Error", isInitializing = false))
+                        _state.emit(_state.value.copy(ecuInfo = "Connection Error", isInitializing = false, initializationError = true))
                     }
                 }
             }
@@ -170,9 +172,9 @@ class ConnectionViewModel(
                 bluetoothManager.sendCommand("AT SP 5")       // ISO 14230-4 KWP2000 Fast Init
                 delay(200)
                 bluetoothManager.sendCommand("ATRV")
-                _state.emit(_state.value.copy(isInitializing = false))
+                _state.emit(_state.value.copy(isInitializing = false, initializationError = false))
             } catch (e: Exception) {
-                _state.emit(_state.value.copy(ecuInfo = "Initialization Error: ${e.message}"))
+                _state.emit(_state.value.copy(ecuInfo = "Initialization Error: ${e.message}", isInitializing = false, initializationError = true))
             }
         }
     }
