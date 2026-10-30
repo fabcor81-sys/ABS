@@ -52,7 +52,7 @@ class ConnectionViewModel(
                                 ecuInfo = if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB)
                                     "USB KKL 409.1: sessione collegata (identificazione ECU non verificata)"
                                 else "ELM327 collegato (identificazione ECU non verificata)",
-                                isInitializing = false
+                                isInitializing = bluetoothManager.activeTransport == BluetoothManager.Transport.BLUETOOTH
                             )
                         )
                         if (bluetoothManager.activeTransport == BluetoothManager.Transport.BLUETOOTH) {
@@ -170,6 +170,7 @@ class ConnectionViewModel(
                 bluetoothManager.sendCommand("AT SP 5")       // ISO 14230-4 KWP2000 Fast Init
                 delay(200)
                 bluetoothManager.sendCommand("ATRV")
+                _state.emit(_state.value.copy(isInitializing = false))
             } catch (e: Exception) {
                 _state.emit(_state.value.copy(ecuInfo = "Initialization Error: ${e.message}"))
             }
