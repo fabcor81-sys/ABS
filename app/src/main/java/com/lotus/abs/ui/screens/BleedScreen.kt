@@ -205,6 +205,9 @@ private fun WheelDetailScreen(
     val context = LocalContext.current
     val busy = state.isBusy()
     var confirmStart by remember { mutableStateOf(false) }
+    var pressureReady by remember(wheel) { mutableStateOf(false) }
+    var bleederReady by remember(wheel) { mutableStateOf(false) }
+    var experimentalAcknowledged by remember(wheel) { mutableStateOf(false) }
     var showFullLog by remember { mutableStateOf(false) }
     var showManual by remember { mutableStateOf(false) }
     var manualRequest by remember { mutableStateOf<String?>(null) }
@@ -254,27 +257,68 @@ private fun WheelDetailScreen(
         )
     }
 
+
     if (confirmStart) {
         AlertDialog(
             onDismissRequest = { confirmStart = false },
-            title = { Text("Confirm ABS procedure") },
+            title = { Text("Pre-start hydraulic checklist") },
             text = {
-                Text(
-                    "Wheel: ${wheel.shortName} • Initialization: $mode\n" +
-                    "6 ISO cycles (300 ms ON / 300 ms OFF); valves then return to rest while the pump remains ON for 5 s.\n\n" +
-                    "Check brake fluid level, bleed setup, and operating conditions. " +
-                    "The 5-second interval is experimental and is not prescribed by the Lotus service manual."
-                )
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Wheel: ${wheel.shortName} • $mode\n" +
+                            "Complete these checks BEFORE activating the ABS pump or valves.",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "Use only a suitable regulated low-pressure bleeding setup. " +
+                            "Check the reservoir fluid level and prevent it from running dry.",
+                        fontSize = 13.sp
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = pressureReady, onCheckedChange = { pressureReady = it })
+                        Text("Brake circuit prepared and correctly pressurized for the selected bleeding method.", fontSize = 13.sp)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = bleederReady, onCheckedChange = { bleederReady = it })
+                        Text("Bleed nipple OPEN on ${wheel.shortName}; collection hose and container secured.", fontSize = 13.sp)
+                    }
+                    Text(
+                        "LOTUS SERVICE NOTES JJ.3: The official Lotus Scan automatic bleeding stage " +
+                            "requires all FOUR caliper nipples open and gentle pedal cycling. " +
+                            "This experimental single-wheel routine is NOT a validated substitute.",
+                        color = MaterialTheme.colorScheme.error, fontSize = 12.sp
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = experimentalAcknowledged, onCheckedChange = { experimentalAcknowledged = it })
+                        Text("I understand the single-wheel procedure and 5-second pump recovery are experimental.", fontSize = 13.sp)
+                    }
+                    Text(
+                        "6 ISO pulses (300 ms ON / 300 ms OFF), followed by 5 s of pump recovery. " +
+                            "No actuator command is sent until you confirm.",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        confirmStart = false
-                        if (state.slowMode) viewModel.runWheelBleedPulseTestMacroSlow(wheel)
-                        else viewModel.runWheelBleedPulseTestMacro(wheel)
+                        if (pressureReady && bleederReady && experimentalAcknowledged &&
+                            actuatorAvailable && !busy && !requiresReview
+                        ) {
+                            confirmStart = false
+                            pressureReady = false
+                            bleederReady = false
+                            experimentalAcknowledged = false
+                            if (state.slowMode) viewModel.runWheelBleedPulseTestMacroSlow(wheel)
+                            else viewModel.runWheelBleedPulseTestMacro(wheel)
+                        }
                     },
-                    enabled = actuatorAvailable && !busy && !requiresReview
-                ) { Text("CONFIRM START") }
+                    enabled = pressureReady && bleederReady && experimentalAcknowledged &&
+                        actuatorAvailable && !busy && !requiresReview
+                ) { Text("CONFIRM & START") }
             },
             dismissButton = {
                 TextButton(onClick = { confirmStart = false }) { Text("Cancel") }
@@ -299,6 +343,31 @@ private fun WheelDetailScreen(
         BleedOutcome(state)
 
         LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (!busy) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().border(
+                            1.dp, LotusYellow, RoundedCornerShape(10.dp)
+                        ),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("BEFORE STARTING THE BLEED CYCLE", fontWeight = FontWeight.Black, color = LotusYellow)
+                            Text(
+                                "Prepare the brake circuit using a suitable low-pressure bleeding method. " +
+                                    "Check fluid level; open the bleed nipple on wheel ${wheel.shortName} " +
+                                    "and attach the collection hose before activating the ABS.",
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                "The official Lotus Scan procedure opens all four nipples; this one-wheel " +
+                                    "routine is experimental. A mandatory checklist appears when you press START.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
