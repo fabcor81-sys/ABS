@@ -214,11 +214,11 @@ fun ConnectionScreen(viewModel: ConnectionViewModel, onBleed: () -> Unit) {
                 }
                 Button(
                     onClick = onBleed,
-                    enabled = !state.isInitializing,
+                    enabled = !state.isInitializing && !state.initializationError,
                     modifier = Modifier.weight(1f).height(48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary)
-                ) { Text(if (state.isInitializing) "Inizializzazione..." else "Vai allo spurgo", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                ) { Text(if (state.initializationError) "Errore inizializzazione" else if (state.isInitializing) "Inizializzazione..." else "Vai allo spurgo", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             } else if (state.connectionStatus == BluetoothManager.ConnectionState.ERROR) {
                 Button(
                     onClick = { viewModel.disconnect() },
@@ -290,14 +290,14 @@ fun ConnectionStatusCard(state: ConnectionScreenState) {
                 )
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val statusColor = when (state.connectionStatus) {
+                    val statusColor = if (state.initializationError) MaterialTheme.colorScheme.error else when (state.connectionStatus) {
                         BluetoothManager.ConnectionState.CONNECTED -> MaterialTheme.colorScheme.tertiary
                         BluetoothManager.ConnectionState.CONNECTING -> MaterialTheme.colorScheme.primary
                         BluetoothManager.ConnectionState.ERROR -> MaterialTheme.colorScheme.error
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                     
-                    val statusText = when (state.connectionStatus) {
+                    val statusText = if (state.initializationError) "Inizializzazione fallita" else when (state.connectionStatus) {
                         BluetoothManager.ConnectionState.CONNECTED -> "Collegato"
                         BluetoothManager.ConnectionState.CONNECTING -> "Connessione..."
                         BluetoothManager.ConnectionState.ERROR -> "Errore"
