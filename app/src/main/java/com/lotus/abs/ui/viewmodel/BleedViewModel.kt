@@ -75,6 +75,8 @@ enum class WheelLocation(
 enum class BleedExecState {
     IDLE,
     RUNNING,
+    COMPLETED,
+    COMPLETED_UNVERIFIED,
     STOPPING,
     STOPPED_CONFIRMED,
     STOP_UNCONFIRMED,
@@ -83,6 +85,11 @@ enum class BleedExecState {
 
 data class BleedState(
     val selectedWheel: WheelLocation? = null,
+    val setupWheel: WheelLocation? = null,
+    val slowMode: Boolean = false,
+    val macroPhase: String = "In attesa",
+    val pulseCycle: Int = 0,
+    val hasUnconfirmedCommands: Boolean = false,
     val terminalLog: List<TerminalEntry> = emptyList(),
     val activeOperation: String? = null,
     val timeRemainingSec: Int = 0,
@@ -160,7 +167,22 @@ class BleedViewModel(
     }
 
     fun selectWheel(wheel: WheelLocation?) {
-        _state.update { it.copy(selectedWheel = wheel) }
+        if (_state.value.isRunningSequence || _state.value.executionState == BleedExecState.STOPPING) return
+        _state.update { it.copy(selectedWheel = wheel, setupWheel = wheel ?: it.setupWheel) }
+    }
+
+    fun selectSetupWheel(wheel: WheelLocation) {
+        if (_state.value.isRunningSequence) return
+        _state.update { it.copy(setupWheel = wheel) }
+    }
+
+    fun setSlowMode(slow: Boolean) {
+        if (_state.value.isRunningSequence) return
+        _state.update { it.copy(slowMode = slow) }
+    }
+
+    private fun updateMacroPhase(phase: String, cycle: Int = 0) {
+        _state.update { it.copy(macroPhase = phase, pulseCycle = cycle) }
     }
 
     private suspend fun executeSafeFastElm327Init() {
@@ -252,6 +274,9 @@ class BleedViewModel(
             )
         )
 
+        if (result.status == CommandStatus.TRANSMITTED) {
+            _state.update { it.copy(hasUnconfirmedCommands = true) }
+        }
         if (!result.isSuccess && (requireAcknowledgement || result.status != CommandStatus.TRANSMITTED)) {
             addSystemLog("⚠️ Command '$commandHex' not confirmed: ${result.status} (${result.statusText}). Aborting macro!")
             // The caller's finally block handles the coordinated emergency stop.
@@ -270,6 +295,7 @@ class BleedViewModel(
      * for service bleeding. Emergency shutdown never uses this delay.
      */
     private suspend fun completeWheelPulseWithPumpRecovery(wheel: WheelLocation): Boolean {
+        updateMacroPhase("Ripristino valvole")
         addSystemLog("End of ISO pulses: return DUMP and ISO to their rest positions; keep pump ON.")
 
         addSystemLog("DUMP OFF (${wheel.dumpOffCommand}) while pump stays ON...")
@@ -282,6 +308,7 @@ class BleedViewModel(
         delay(300)
         if (checkStopRequested() || !activeTransport.isConnected) return false
 
+        updateMacroPhase("Recupero accumulatore — pompa attiva")
         addSystemLog("Experimental accumulator recovery: keep pump ON for ${postPulsePumpRecoverySeconds}s.")
         _state.update {
             it.copy(
@@ -296,6 +323,7 @@ class BleedViewModel(
         }
 
         if (checkStopRequested() || !activeTransport.isConnected) return false
+        updateMacroPhase("Spegnimento pompa")
         addSystemLog("Accumulator recovery interval complete: pump OFF (30 02 07 00)...")
         if (!executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel, requireAcknowledgement = true)) return false
         delay(300)
@@ -437,6 +465,9 @@ class BleedViewModel(
                     activeOperation = "Bleeding Test (${wheel.shortName})",
                     timeRemainingSec = 0,
                     isRunningSequence = true,
+                    macroPhase = "Inizializzazione",
+                    pulseCycle = 0,
+                    hasUnconfirmedCommands = false,
                     executionState = BleedExecState.RUNNING
                 )
             }
@@ -448,6 +479,7 @@ class BleedViewModel(
                 executeSafeFastElm327Init()
                 if (checkStopRequested()) return@launch
 
+                updateMacroPhase("Preparazione DUMP")
                 // 1. Send DUMP ON
                 addSystemLog("Step 1/5: Opening DUMP valve (${wheel.dumpOnCommand})")
                 if (!executeMacroStep(wheel.dumpOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -457,6 +489,7 @@ class BleedViewModel(
                 delay(1000)
                 if (checkStopRequested()) return@launch
 
+                updateMacroPhase("Avvio pompa ABS")
                 // 3. Send ABS Pump ON
                 addSystemLog("Step 3/5: Starting ABS Pump ON (30 02 07 01)")
                 if (!executeMacroStep("30 02 07 01", CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -469,6 +502,7 @@ class BleedViewModel(
                 // 5. 6 Pulsation cycles on ISO valve (300ms ON / 300ms OFF)
                 addSystemLog("Step 5/5: Executing 6 hydraulic pulsation cycles on ISO valve (300ms ON / 300ms OFF)...")
                 for (cycle in 1..6) {
+                    updateMacroPhase("Pulsazione ISO", cycle)
                     if (checkStopRequested()) return@launch
                     addSystemLog("Pulse $cycle/6: ISO ON (${wheel.isoOnCommand})")
                     if (!executeMacroStep(wheel.isoOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -492,7 +526,8 @@ class BleedViewModel(
                         activeOperation = null,
                         timeRemainingSec = 0,
                         isRunningSequence = false,
-                        executionState = BleedExecState.IDLE
+                        executionState = if (it.hasUnconfirmedCommands) BleedExecState.COMPLETED_UNVERIFIED else BleedExecState.COMPLETED,
+                        macroPhase = if (it.hasUnconfirmedCommands) "Terminata — conferme incomplete" else "Sequenza terminata"
                     )
                 }
                 completedNormally = true
@@ -522,6 +557,9 @@ class BleedViewModel(
                     activeOperation = "Bleeding Test Slow (${wheel.shortName})",
                     timeRemainingSec = 0,
                     isRunningSequence = true,
+                    macroPhase = "Inizializzazione",
+                    pulseCycle = 0,
+                    hasUnconfirmedCommands = false,
                     executionState = BleedExecState.RUNNING
                 )
             }
@@ -533,6 +571,7 @@ class BleedViewModel(
                 executeSlowElm327Init()
                 if (checkStopRequested()) return@launch
 
+                updateMacroPhase("Preparazione DUMP")
                 // 1. Send DUMP ON
                 addSystemLog("Step 1/5: Opening DUMP valve (${wheel.dumpOnCommand})")
                 if (!executeMacroStep(wheel.dumpOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -542,6 +581,7 @@ class BleedViewModel(
                 delay(1000)
                 if (checkStopRequested()) return@launch
 
+                updateMacroPhase("Avvio pompa ABS")
                 // 3. Send ABS Pump ON
                 addSystemLog("Step 3/5: Starting ABS Pump ON (30 02 07 01)")
                 if (!executeMacroStep("30 02 07 01", CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -554,6 +594,7 @@ class BleedViewModel(
                 // 5. 6 Pulsation cycles on ISO valve (300ms ON / 300ms OFF)
                 addSystemLog("Step 5/5: Executing 6 hydraulic pulsation cycles on ISO valve (300ms ON / 300ms OFF)...")
                 for (cycle in 1..6) {
+                    updateMacroPhase("Pulsazione ISO", cycle)
                     if (checkStopRequested()) return@launch
                     addSystemLog("Pulse $cycle/6: ISO ON (${wheel.isoOnCommand})")
                     if (!executeMacroStep(wheel.isoOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -577,7 +618,8 @@ class BleedViewModel(
                         activeOperation = null,
                         timeRemainingSec = 0,
                         isRunningSequence = false,
-                        executionState = BleedExecState.IDLE
+                        executionState = if (it.hasUnconfirmedCommands) BleedExecState.COMPLETED_UNVERIFIED else BleedExecState.COMPLETED,
+                        macroPhase = if (it.hasUnconfirmedCommands) "Terminata — conferme incomplete" else "Sequenza terminata"
                     )
                 }
                 completedNormally = true
