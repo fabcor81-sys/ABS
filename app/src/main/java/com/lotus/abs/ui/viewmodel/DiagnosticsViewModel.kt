@@ -34,6 +34,7 @@ data class DiagnosticsState(
     val isSending: Boolean = false,
     val lastActionMessage: String? = null,
     val lastActionSuccess: Boolean = false,
+    val canClearDtc: Boolean = false,
     val connectionState: BluetoothManager.ConnectionState = BluetoothManager.ConnectionState.DISCONNECTED
 )
 
@@ -57,7 +58,11 @@ class DiagnosticsViewModel(
     private fun observeBluetoothConnection() {
         viewModelScope.launch {
             bluetoothManager.connectionState.collect { connectionState ->
-                _state.emit(_state.value.copy(connectionState = connectionState))
+                _state.emit(_state.value.copy(
+                    connectionState = connectionState,
+                    canClearDtc = connectionState == BluetoothManager.ConnectionState.CONNECTED &&
+                        bluetoothManager.activeTransport != BluetoothManager.Transport.USB
+                ))
                 when (connectionState) {
                     BluetoothManager.ConnectionState.CONNECTED -> {
                         addSystemLog("Device connected. Terminal active.")
@@ -176,8 +181,8 @@ class DiagnosticsViewModel(
     fun clearAllDTCs() {
         if (_state.value.isSending) return
         viewModelScope.launch {
-            if (_state.value.connectionState != BluetoothManager.ConnectionState.CONNECTED) {
-                val message = "Nessuna connessione: impossibile cancellare i DTC."
+            if (_state.value.connectionState != BluetoothManager.ConnectionState.CONNECTED || !_state.value.canClearDtc) {
+                val message = "Cancellazione DTC non disponibile: manca connessione oppure il trasporto USB è in sola lettura."
                 addErrorLog(message)
                 _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
                 return@launch
