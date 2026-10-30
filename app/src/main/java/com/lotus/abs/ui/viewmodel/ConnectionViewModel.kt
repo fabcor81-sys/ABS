@@ -118,6 +118,7 @@ class ConnectionViewModel(
     }
     
     fun setTransport(transport: TransportType) {
+        if (transport == TransportType.USB) bluetoothManager.stopScan()
         _state.value = _state.value.copy(selectedTransport = transport, selectedDevice = null, selectedUsbDevice = null)
         refreshDeviceList()
     }
