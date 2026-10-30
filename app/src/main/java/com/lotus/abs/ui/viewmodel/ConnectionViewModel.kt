@@ -51,8 +51,8 @@ class ConnectionViewModel(
                         _state.emit(
                             _state.value.copy(
                                 ecuInfo = if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB)
-                                    "USB KKL 409.1: sessione collegata (identificazione ECU non verificata)"
-                                else "ELM327 collegato (identificazione ECU non verificata)",
+                                    "USB KKL 409.1: transport connected (ECU identification not verified)"
+                                else "ELM327 connected (ECU identification not verified)",
                                 isInitializing = bluetoothManager.activeTransport == BluetoothManager.Transport.BLUETOOTH,
                                 initializationError = false
                             )
