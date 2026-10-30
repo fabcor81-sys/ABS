@@ -27,7 +27,7 @@ class NavigationFlowTest {
         rule.onNodeWithText("Spurgo ABS assistito").assertIsDisplayed()
         rule.onNodeWithText("LF").performScrollTo().performClick()
         rule.onNodeWithText("CONTINUA E VERIFICA").performScrollTo().performClick()
-        rule.onNodeWithText("Spurgo LF • FAST").assertIsDisplayed()
+        rule.onNodeWithText("Spurgo LF • FAST INIT").assertIsDisplayed()
         rule.onNodeWithContentDescription("Torna alla selezione").performClick()
         rule.onNodeWithText("Spurgo ABS assistito").assertIsDisplayed()
         rule.onNodeWithContentDescription("Torna alla Home").performClick()
@@ -39,7 +39,7 @@ class NavigationFlowTest {
         rule.onNodeWithText("SPURGO ABS").performClick()
         rule.onNodeWithText("RF").performScrollTo().performClick()
         rule.onNodeWithText("CONTINUA E VERIFICA").performScrollTo().performClick()
-        rule.onNodeWithText("Spurgo RF • FAST").assertIsDisplayed()
+        rule.onNodeWithText("Spurgo RF • FAST INIT").assertIsDisplayed()
         Espresso.pressBack()
         rule.onNodeWithText("Spurgo ABS assistito").assertIsDisplayed()
         Espresso.pressBack()
@@ -68,10 +68,10 @@ class NavigationFlowTest {
     @Test
     fun setupAllowsSlowSelectionForOneWheel() {
         rule.onNodeWithText("SPURGO ABS").performClick()
-        rule.onNodeWithText("SLOW").performScrollTo().performClick()
+        rule.onNodeWithText("SLOW INIT").performScrollTo().performClick()
         rule.onNodeWithText("LR").performScrollTo().performClick()
         rule.onNodeWithText("CONTINUA E VERIFICA").performScrollTo().performClick()
-        rule.onNodeWithText("Spurgo LR • SLOW").assertIsDisplayed()
+        rule.onNodeWithText("Spurgo LR • SLOW INIT").assertIsDisplayed()
         rule.onNodeWithContentDescription("Torna alla selezione").performClick()
         rule.onNodeWithText("Spurgo ABS assistito").assertIsDisplayed()
     }
