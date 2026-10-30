@@ -56,7 +56,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 
     val macroCommands = listOf(
         MacroCommand("Leggi DTC", "18 02"),
-        MacroCommand("Leggi identificazione", "1A 90")
+        MacroCommand("Identificazione ECU", "1A 80")
     )
 
     if (confirmClear) {
