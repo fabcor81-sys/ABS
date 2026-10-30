@@ -207,6 +207,9 @@ private fun WheelDetailScreen(
     var confirmStart by remember { mutableStateOf(false) }
     var showFullLog by remember { mutableStateOf(false) }
     var showManual by remember { mutableStateOf(false) }
+    var manualRequest by remember { mutableStateOf<String?>(null) }
+    var confirmAcknowledge by remember { mutableStateOf(false) }
+    val requiresReview = state.executionState in setOf(BleedExecState.ERROR, BleedExecState.STOP_UNCONFIRMED, BleedExecState.COMPLETED_UNVERIFIED)
     val mode = if (state.slowMode) "SLOW" else "FAST"
 
     val attemptBack = {
@@ -214,6 +217,42 @@ private fun WheelDetailScreen(
         else onBack()
     }
     BackHandler(enabled = true) { attemptBack() }
+
+    if (manualRequest != null) {
+        val requested = manualRequest!!
+        AlertDialog(
+            onDismissRequest = { manualRequest = null },
+            title = { Text("Conferma test manuale $requested") },
+            text = { Text("Azionare la valvola $requested della ruota ${wheel.shortName} per 1 secondo? Lo spegnimento verrà richiesto e verificato.") },
+            confirmButton = {
+                Button(onClick = {
+                    manualRequest = null
+                    if (requested == "ISO") {
+                        viewModel.runBleedSequence("ISO ${wheel.shortName}", wheel.isoOnCommand, wheel.isoOffCommand, 1)
+                    } else {
+                        viewModel.runBleedSequence("DUMP ${wheel.shortName}", wheel.dumpOnCommand, wheel.dumpOffCommand, 1)
+                    }
+                }, enabled = actuatorAvailable && !busy && !requiresReview) {
+                    Text("CONFERMA TEST")
+                }
+            },
+            dismissButton = { TextButton(onClick = { manualRequest = null }) { Text("Annulla") } }
+        )
+    }
+
+    if (confirmAcknowledge) {
+        AlertDialog(
+            onDismissRequest = { confirmAcknowledge = false },
+            title = { Text("Esito ABS non verificato") },
+            text = { Text("Confermi di aver verificato fisicamente l'impianto frenante e di voler sbloccare nuovi comandi? La conferma non certifica la sicurezza del circuito.") },
+            confirmButton = {
+                Button(onClick = { confirmAcknowledge = false; viewModel.acknowledgeOutcome() }) {
+                    Text("HO ESEGUITO LA VERIFICA")
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmAcknowledge = false }) { Text("Annulla") } }
+        )
+    }
 
     if (confirmStart) {
         AlertDialog(
@@ -234,7 +273,7 @@ private fun WheelDetailScreen(
                         if (state.slowMode) viewModel.runWheelBleedPulseTestMacroSlow(wheel)
                         else viewModel.runWheelBleedPulseTestMacro(wheel)
                     },
-                    enabled = actuatorAvailable && !busy
+                    enabled = actuatorAvailable && !busy && !requiresReview
                 ) { Text("CONFERMA AVVIO") }
             },
             dismissButton = {
@@ -292,7 +331,7 @@ private fun WheelDetailScreen(
                                 )
                             }
                             if (state.timeRemainingSec > 0) {
-                                Text("Recupero pompa: ${state.timeRemainingSec} s rimanenti", fontWeight = FontWeight.Bold)
+                                Text(if (state.macroPhase.startsWith("Recupero")) "Recupero pompa: ${state.timeRemainingSec} s" else "Tempo rimanente: ${state.timeRemainingSec} s", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -332,15 +371,11 @@ private fun WheelDetailScreen(
                                 Text("Attivazione limitata a 1 secondo con spegnimento automatico. Solo per diagnostica controllata.",
                                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Button(
-                                    onClick = {
-                                        viewModel.runBleedSequence("ISO ${wheel.shortName}", wheel.isoOnCommand, wheel.isoOffCommand, 1)
-                                    }, enabled = actuatorAvailable && !busy,
+                                    onClick = { manualRequest = "ISO" }, enabled = actuatorAvailable && !busy && !requiresReview,
                                     modifier = Modifier.fillMaxWidth()
                                 ) { Text("Test ISO (1 s)") }
                                 Button(
-                                    onClick = {
-                                        viewModel.runBleedSequence("DUMP ${wheel.shortName}", wheel.dumpOnCommand, wheel.dumpOffCommand, 1)
-                                    }, enabled = actuatorAvailable && !busy,
+                                    onClick = { manualRequest = "DUMP" }, enabled = actuatorAvailable && !busy && !requiresReview,
                                     modifier = Modifier.fillMaxWidth()
                                 ) { Text("Test DUMP (1 s)") }
                             }
@@ -363,9 +398,18 @@ private fun WheelDetailScreen(
                 Text(if (state.executionState == BleedExecState.STOPPING) "ARRESTO IN CORSO" else "STOP EMERGENZA", fontWeight = FontWeight.Black)
             }
         } else {
+            if (requiresReview) {
+                Button(
+                    onClick = { confirmAcknowledge = true },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = Color.White)
+                ) { Text("VERIFICA E SBLOCCA", fontWeight = FontWeight.Bold) }
+                Spacer(Modifier.height(6.dp))
+            }
             Button(
                 onClick = { confirmStart = true },
-                enabled = actuatorAvailable,
+                enabled = actuatorAvailable && !requiresReview,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = LotusYellow, contentColor = Color.Black)
             ) {
