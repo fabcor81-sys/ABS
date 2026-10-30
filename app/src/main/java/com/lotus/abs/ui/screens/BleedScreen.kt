@@ -43,11 +43,11 @@ private fun BleedState.isBusy(): Boolean =
     isRunningSequence || executionState == BleedExecState.STOPPING
 
 @Composable
-fun BleedScreen(viewModel: BleedViewModel, onOpenConnection: () -> Unit, isAdapterInitializing: Boolean = false) {
+fun BleedScreen(viewModel: BleedViewModel, onOpenConnection: () -> Unit, isAdapterInitializing: Boolean = false, initializationFailed: Boolean = false) {
     val state by viewModel.state.collectAsState()
     val connectionStatus by viewModel.bluetoothManager.connectionState.collectAsState()
     val connected = connectionStatus == BluetoothManager.ConnectionState.CONNECTED
-    val capable = connected && !isAdapterInitializing && viewModel.activeTransport.canExecute(CommandCategory.ACTUATOR_CONTROL)
+    val capable = connected && !isAdapterInitializing && !initializationFailed && viewModel.activeTransport.canExecute(CommandCategory.ACTUATOR_CONTROL)
 
     if (state.selectedWheel != null) {
         WheelDetailScreen(
