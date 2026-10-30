@@ -164,7 +164,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         state.dtcList.forEach { record ->
-                            DTCItemCard(record = record, onDelete = { viewModel.deleteDTC(record) })
+                            DTCItemCard(record = record, description = viewModel.decodeDTC(record.code), onDelete = { viewModel.deleteDTC(record) })
                         }
                     }
                 }
@@ -299,7 +299,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 }
 
 @Composable
-fun DTCItemCard(record: DTCRecord, onDelete: () -> Unit) {
+fun DTCItemCard(record: DTCRecord, description: String, onDelete: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -326,7 +326,7 @@ fun DTCItemCard(record: DTCRecord, onDelete: () -> Unit) {
                         )
                     }
                     Text(
-                        text = "Status: ${record.status}",
+                        text = "Status: ${if (record.status == "Attivo") "Active" else record.status}",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -335,7 +335,7 @@ fun DTCItemCard(record: DTCRecord, onDelete: () -> Unit) {
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = record.description,
+                    text = description,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
