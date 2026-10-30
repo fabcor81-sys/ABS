@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class LiveDataState(
     val ecuId: String = "--",
@@ -20,7 +23,9 @@ data class LiveDataState(
     val speedFR: String = "--",
     val speedRL: String = "--",
     val speedRR: String = "--",
-    val isPolling: Boolean = false
+    val isPolling: Boolean = false,
+    val isConnected: Boolean = false,
+    val lastUpdated: String = "No readings yet"
 )
 
 class LiveDataViewModel(
@@ -37,6 +42,7 @@ class LiveDataViewModel(
     private fun observeBluetoothConnection() {
         viewModelScope.launch {
             bluetoothManager.connectionState.collect { connectionState ->
+                _state.update { it.copy(isConnected = connectionState == BluetoothManager.ConnectionState.CONNECTED) }
                 if (connectionState != BluetoothManager.ConnectionState.CONNECTED) {
                     if (_state.value.isPolling) {
                         stopPolling()
@@ -63,22 +69,31 @@ class LiveDataViewModel(
                         }
 
                         if (line.contains("5A80")) {
+                            markReadingUpdated()
                             _state.update { it.copy(ecuId = extractValue(line, "5A80")) }
                         } else if (line.contains("5A91")) {
+                            markReadingUpdated()
                             _state.update { it.copy(designCode = extractValue(line, "5A91")) }
                         } else if (line.contains("5A92")) {
+                            markReadingUpdated()
                             _state.update { it.copy(hwVersion = extractValue(line, "5A92")) }
                         } else if (line.contains("5A94")) {
+                            markReadingUpdated()
                             _state.update { it.copy(swVersion = extractValue(line, "5A94")) }
                         } else if (line.contains("6130")) {
+                            markReadingUpdated()
                             _state.update { it.copy(batteryVoltage = extractVoltage(line, "6130")) }
                         } else if (line.contains("6131")) {
+                            markReadingUpdated()
                             _state.update { it.copy(speedFL = extractSpeed(line, "6131")) }
                         } else if (line.contains("6132")) {
+                            markReadingUpdated()
                             _state.update { it.copy(speedFR = extractSpeed(line, "6132")) }
                         } else if (line.contains("6133")) {
+                            markReadingUpdated()
                             _state.update { it.copy(speedRL = extractSpeed(line, "6133")) }
                         } else if (line.contains("6134")) {
+                            markReadingUpdated()
                             _state.update { it.copy(speedRR = extractSpeed(line, "6134")) }
                         } else if (line.startsWith("7F")) {
                             // Negative Response Code (NRC) from KWP2000
@@ -91,32 +106,37 @@ class LiveDataViewModel(
         }
     }
 
+    private fun markReadingUpdated() {
+        val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        _state.update { it.copy(lastUpdated = time) }
+    }
+
     private fun extractValue(rawLine: String, prefix: String): String {
         val payload = rawLine.substringAfter(prefix, "")
-        if (payload.isEmpty()) return "Non supportato"
+        if (payload.isEmpty()) return "Not supported"
         return payload
     }
 
     private fun extractVoltage(rawLine: String, prefix: String = "6130"): String {
         val payload = rawLine.substringAfter(prefix, "")
-        if (payload.isEmpty() || payload.length < 2) return "Non supportato"
+        if (payload.isEmpty() || payload.length < 2) return "Not supported"
         return try {
             val valByte = payload.substring(0, 2).toInt(16)
             val volts = valByte * 0.1f
-            String.format(java.util.Locale.US, "%.1f V", volts)
+            String.format(java.util.Locale.US, "%.1f", volts)
         } catch (_: Exception) {
-            "Non supportato"
+            "Not supported"
         }
     }
 
     private fun extractSpeed(rawLine: String, prefix: String): String {
         val payload = rawLine.substringAfter(prefix, "")
-        if (payload.isEmpty() || payload.length < 2) return "Non supportato"
+        if (payload.isEmpty() || payload.length < 2) return "Not supported"
         return try {
             val valByte = payload.substring(0, 2).toInt(16)
-            "$valByte km/h"
+            "$valByte"
         } catch (_: Exception) {
-            "Non supportato"
+            "Not supported"
         }
     }
 

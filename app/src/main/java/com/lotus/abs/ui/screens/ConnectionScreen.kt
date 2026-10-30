@@ -9,7 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -24,9 +24,10 @@ import androidx.compose.ui.unit.sp
 import com.lotus.abs.bluetooth.BluetoothManager
 import com.lotus.abs.ui.viewmodel.ConnectionScreenState
 import com.lotus.abs.ui.viewmodel.ConnectionViewModel
+import com.lotus.abs.ui.viewmodel.TransportType
 
 @Composable
-fun ConnectionScreen(viewModel: ConnectionViewModel) {
+fun ConnectionScreen(viewModel: ConnectionViewModel, onBleed: () -> Unit) {
     val state by viewModel.state.collectAsState()
 
     Column(
@@ -35,33 +36,9 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
             .background(MaterialTheme.colorScheme.background)
             .padding(16.dp)
     ) {
-        // App Title / Navigation Header
-        if (state.connectionStatus != BluetoothManager.ConnectionState.DISCONNECTED) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp)
-            ) {
-                IconButton(onClick = { viewModel.disconnect() }) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-                Text(
-                    "Back to Scanned Devices",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .clickable { viewModel.disconnect() }
-                        .padding(start = 4.dp)
-                )
-            }
-        }
-
+        Text("Choose a connection", fontWeight = FontWeight.Bold, fontSize = 18.sp,
+            modifier = Modifier.padding(bottom = 12.dp))
+        // The Home button navigates without disconnecting the adapter.
         // Transport Selection (Only show when disconnected)
         if (state.connectionStatus == BluetoothManager.ConnectionState.DISCONNECTED) {
             Row(
@@ -158,7 +135,7 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                     ) {
                         Text(
-                            if (state.isScanning) "Scanning for nearby BLE & Bluetooth devices..." else "No devices found. Tap 'Scan for Devices' below.",
+                            if (state.isScanning) "Scanning for nearby BLE & Bluetooth devices..." else "No devices found. Tap 'Scan for devices' below.",
                             modifier = Modifier.padding(16.dp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -235,6 +212,13 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                 ) {
                     Text("Disconnect", fontWeight = FontWeight.Bold)
                 }
+                Button(
+                    onClick = onBleed,
+                    enabled = !state.isInitializing && !state.initializationError,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary)
+                ) { Text(if (state.initializationError) "Initialization failed" else if (state.isInitializing) "Initializing..." else "Go to ABS Bleeding", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             } else if (state.connectionStatus == BluetoothManager.ConnectionState.ERROR) {
                 Button(
                     onClick = { viewModel.disconnect() },
@@ -242,7 +226,7 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Back to Scanned Devices")
+                    Text("Retry / Back to devices")
                 }
             } else {
                 if (state.isScanning) {
@@ -252,7 +236,7 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("Stop Scan", fontWeight = FontWeight.Bold)
+                        Text("Stop scan", fontWeight = FontWeight.Bold)
                     }
                 } else {
                     Button(
@@ -261,7 +245,7 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("Scan for Devices", fontWeight = FontWeight.Bold)
+                        Text(if (state.selectedTransport == TransportType.USB) "Refresh USB devices" else "Scan for devices", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -289,7 +273,7 @@ fun ConnectionStatusCard(state: ConnectionScreenState) {
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Bluetooth,
+                    imageVector = if (state.selectedTransport == TransportType.USB) Icons.Default.Usb else Icons.Default.Bluetooth,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.secondary
                 )
@@ -299,21 +283,21 @@ fun ConnectionStatusCard(state: ConnectionScreenState) {
             
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "ELM327 BLE",
+                    text = if (state.selectedTransport == TransportType.USB) "USB KKL 409.1" else "Bluetooth ELM327",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val statusColor = when (state.connectionStatus) {
+                    val statusColor = if (state.initializationError) MaterialTheme.colorScheme.error else when (state.connectionStatus) {
                         BluetoothManager.ConnectionState.CONNECTED -> MaterialTheme.colorScheme.tertiary
                         BluetoothManager.ConnectionState.CONNECTING -> MaterialTheme.colorScheme.primary
                         BluetoothManager.ConnectionState.ERROR -> MaterialTheme.colorScheme.error
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                     
-                    val statusText = when (state.connectionStatus) {
+                    val statusText = if (state.initializationError) "Initialization failed" else when (state.connectionStatus) {
                         BluetoothManager.ConnectionState.CONNECTED -> "Connected"
                         BluetoothManager.ConnectionState.CONNECTING -> "Connecting..."
                         BluetoothManager.ConnectionState.ERROR -> "Error"
@@ -392,7 +376,7 @@ fun EcuInfoCard(state: ConnectionScreenState) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                "Target ECU",
+                "Connection details",
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp,
                 color = MaterialTheme.colorScheme.primary
@@ -400,11 +384,11 @@ fun EcuInfoCard(state: ConnectionScreenState) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
 
-            Text("Device: ${state.selectedDevice?.name ?: "Unknown"}", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
-            Text("Address: ${state.selectedDevice?.address ?: "N/A"}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Device: ${if (state.selectedTransport == TransportType.USB) state.selectedUsbDevice?.name ?: "KKL" else state.selectedDevice?.name ?: "Unknown"}", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+            Text("Address: ${if (state.selectedTransport == TransportType.USB) state.selectedUsbDevice?.address ?: "N/A" else state.selectedDevice?.address ?: "N/A"}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(8.dp))
             Text("Protocol: KWP2000", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Baud: 10400", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Nominal baud rate: 10400", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(state.ecuInfo, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.tertiary)
         }
     }

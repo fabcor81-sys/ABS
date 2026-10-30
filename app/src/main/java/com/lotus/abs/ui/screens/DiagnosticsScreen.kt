@@ -20,6 +20,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -30,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lotus.abs.data.entity.DTCRecord
 import com.lotus.abs.ui.theme.LotusYellow
+import com.lotus.abs.bluetooth.BluetoothManager
 import com.lotus.abs.ui.viewmodel.DiagnosticsViewModel
 import com.lotus.abs.ui.viewmodel.TerminalEntry
 import com.lotus.abs.ui.viewmodel.TerminalEntryType
@@ -40,6 +44,8 @@ data class MacroCommand(val name: String, val command: String)
 fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
     val state by viewModel.state.collectAsState()
     val terminalListState = rememberLazyListState()
+    var confirmClear by remember { mutableStateOf(false) }
+    val connected = state.connectionState == BluetoothManager.ConnectionState.CONNECTED
 
     // Auto-scroll terminal log to bottom when new entries arrive
     LaunchedEffect(state.terminalLog) {
@@ -49,10 +55,21 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
     }
 
     val macroCommands = listOf(
-        MacroCommand("Read DTC", "18 02"),
-        MacroCommand("Clear DTC", "14 FF 00"),
-        MacroCommand("Read VIN", "1A 90")
+        MacroCommand("Read DTCs", "18 02"),
+        MacroCommand("Read ECU identification", "1A 80")
     )
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("Confirm DTC clearing") },
+            text = { Text("Send the clear-DTC command to the ABS ECU? Local history will only be deleted after a confirmed positive ECU response.") },
+            confirmButton = {
+                Button(onClick = { confirmClear = false; viewModel.clearAllDTCs() }) { Text("CLEAR DTCs") }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -68,16 +85,33 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
         ) {
             Column {
                 Text(
-                    text = "Diagnostica ABS / DTC",
+                    text = "ABS / DTC Diagnostics",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
-                    text = "Lettura, decodifica e cancellazione errori ECU",
+                    text = "Read, decode and clear ECU fault codes",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+
+        Text(
+            if (connected) "Adapter connected • read-only terminal" else "Adapter disconnected • connect before sending commands",
+            modifier = Modifier.padding(bottom = 10.dp),
+            color = if (connected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+            fontSize = 12.sp
+        )
+        state.lastActionMessage?.let { message ->
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Text(message, modifier = Modifier.padding(12.dp),
+                    color = if (state.lastActionSuccess) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+                    fontSize = 12.sp)
             }
         }
 
@@ -105,7 +139,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Errori Rilevati (${state.dtcList.size})",
+                                text = "Detected DTCs (${state.dtcList.size})",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                                 color = MaterialTheme.colorScheme.error
@@ -113,7 +147,8 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                         }
 
                         Button(
-                            onClick = { viewModel.clearAllDTCs() },
+                            onClick = { confirmClear = true },
+                            enabled = state.canClearDtc && !state.isSending,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.error,
                                 contentColor = Color.White
@@ -121,7 +156,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                         ) {
-                            Text("Cancella Tutti", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Clear ECU DTCs", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -129,11 +164,18 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         state.dtcList.forEach { record ->
-                            DTCItemCard(record = record, onDelete = { viewModel.deleteDTC(record) })
+                            DTCItemCard(record = record, description = viewModel.decodeDTC(record.code), onDelete = { viewModel.deleteDTC(record) })
                         }
                     }
                 }
             }
+        }
+
+        if (connected && !state.canClearDtc) {
+            Text("The current USB KKL transport is read-only: DTC clearing is disabled.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 10.dp))
         }
 
         // Section 2: Terminal Window
@@ -150,11 +192,11 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
             )
             IconButton(
                 onClick = { viewModel.clearTerminal() },
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(48.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Delete,
-                    contentDescription = "Pulisci Log",
+                    contentDescription = "Clear terminal log",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -183,7 +225,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 
         // Macro Action Chips
         Text(
-            "Comandi Rapidi",
+            "Read-only diagnostic commands",
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -199,7 +241,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
             items(macroCommands) { macro ->
                 Card(
                     modifier = Modifier
-                        .clickable { viewModel.sendCommand(macro.command) }
+                        .clickable(enabled = connected && !state.isSending) { viewModel.sendCommand(macro.command) }
                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
@@ -223,13 +265,13 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                 value = state.customCommand,
                 onValueChange = { viewModel.updateCustomCommand(it) },
                 placeholder = {
-                    Text("Invia comando custom (es. 18 02)...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Read-only command (e.g. 18 02)...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(
-                    onSend = { viewModel.sendCustomCommand() }
+                    onSend = { if (connected && !state.isSending) viewModel.sendCustomCommand() }
                 ),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -241,7 +283,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 
             Button(
                 onClick = { viewModel.sendCustomCommand() },
-                enabled = state.customCommand.isNotBlank(),
+                enabled = connected && !state.isSending && state.customCommand.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -250,14 +292,14 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.height(52.dp)
             ) {
-                Icon(imageVector = Icons.AutoMirrored.Filled.Send, contentDescription = "Invia")
+                Icon(imageVector = Icons.AutoMirrored.Filled.Send, contentDescription = "Send command")
             }
         }
     }
 }
 
 @Composable
-fun DTCItemCard(record: DTCRecord, onDelete: () -> Unit) {
+fun DTCItemCard(record: DTCRecord, description: String, onDelete: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -284,7 +326,7 @@ fun DTCItemCard(record: DTCRecord, onDelete: () -> Unit) {
                         )
                     }
                     Text(
-                        text = "Stato: ${record.status}",
+                        text = "Status: ${if (record.status == "Attivo") "Active" else record.status}",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -293,17 +335,17 @@ fun DTCItemCard(record: DTCRecord, onDelete: () -> Unit) {
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = record.description,
+                    text = description,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
 
-            IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+            IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
                 Icon(
                     imageVector = Icons.Default.Delete,
-                    contentDescription = "Elimina DTC",
+                    contentDescription = "Remove from local history",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

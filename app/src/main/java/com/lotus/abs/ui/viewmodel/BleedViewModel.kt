@@ -75,6 +75,8 @@ enum class WheelLocation(
 enum class BleedExecState {
     IDLE,
     RUNNING,
+    COMPLETED,
+    COMPLETED_UNVERIFIED,
     STOPPING,
     STOPPED_CONFIRMED,
     STOP_UNCONFIRMED,
@@ -83,6 +85,11 @@ enum class BleedExecState {
 
 data class BleedState(
     val selectedWheel: WheelLocation? = null,
+    val setupWheel: WheelLocation? = null,
+    val slowMode: Boolean = false,
+    val macroPhase: String = "Ready",
+    val pulseCycle: Int = 0,
+    val hasUnconfirmedCommands: Boolean = false,
     val terminalLog: List<TerminalEntry> = emptyList(),
     val activeOperation: String? = null,
     val timeRemainingSec: Int = 0,
@@ -99,6 +106,10 @@ class BleedViewModel(
 
     private var activeJob: Job? = null
     private val isStopInProgress = AtomicBoolean(false)
+
+    // Experimental per-wheel recovery interval. The Lotus service notes describe
+    // brief pump overrun, but do not specify a diagnostic bleed duration.
+    private val postPulsePumpRecoverySeconds = 5
 
     val activeTransport: DiagnosticTransport
         get() = customTransport ?: bluetoothManager
@@ -156,7 +167,37 @@ class BleedViewModel(
     }
 
     fun selectWheel(wheel: WheelLocation?) {
-        _state.update { it.copy(selectedWheel = wheel) }
+        if (_state.value.isRunningSequence || _state.value.executionState == BleedExecState.STOPPING) return
+        _state.update { it.copy(selectedWheel = wheel, setupWheel = wheel ?: it.setupWheel) }
+    }
+
+    fun selectSetupWheel(wheel: WheelLocation) {
+        if (_state.value.isRunningSequence) return
+        _state.update { it.copy(setupWheel = wheel) }
+    }
+
+    fun setSlowMode(slow: Boolean) {
+        if (_state.value.isRunningSequence) return
+        _state.update { it.copy(slowMode = slow) }
+    }
+
+    // Dismiss an unverified result only after the operator has inspected
+    // the hardware and consciously accepted the need for further checking.
+    fun acknowledgeOutcome() {
+        if (_state.value.isRunningSequence) return
+        if (_state.value.executionState !in setOf(
+                BleedExecState.ERROR,
+                BleedExecState.STOP_UNCONFIRMED,
+                BleedExecState.COMPLETED_UNVERIFIED
+            )) return
+        addSystemLog("Operator acknowledged unverified ABS result; physical safety is NOT verified by the app.")
+        _state.update {
+            it.copy(executionState = BleedExecState.IDLE, macroPhase = "Awaiting physical inspection")
+        }
+    }
+
+    private fun updateMacroPhase(phase: String, cycle: Int = 0) {
+        _state.update { it.copy(macroPhase = phase, pulseCycle = cycle) }
     }
 
     private suspend fun executeSafeFastElm327Init() {
@@ -227,7 +268,8 @@ class BleedViewModel(
     private suspend fun executeMacroStep(
         commandHex: String,
         category: CommandCategory,
-        wheel: WheelLocation
+        wheel: WheelLocation,
+        requireAcknowledgement: Boolean = false
     ): Boolean {
         if (checkStopRequested() || !activeTransport.isConnected) {
             return false
@@ -247,12 +289,63 @@ class BleedViewModel(
             )
         )
 
-        if (!result.isSuccess && result.status != CommandStatus.TRANSMITTED) {
-            addSystemLog("⚠️ Command '$commandHex' failed with status ${result.status} (${result.statusText}). Aborting macro!")
-            executeCoordinatedStop(wheel)
+        if (result.status == CommandStatus.TRANSMITTED) {
+            _state.update { it.copy(hasUnconfirmedCommands = true) }
+        }
+        if (!result.isSuccess && (requireAcknowledgement || result.status != CommandStatus.TRANSMITTED)) {
+            addSystemLog("⚠️ Command '$commandHex' not confirmed: ${result.status} (${result.statusText}). Aborting macro!")
+            // The caller's finally block handles the coordinated emergency stop.
             return false
         }
 
+        return true
+    }
+
+    /**
+     * Normal completion for ONE wheel only. During ordinary ABS brake release
+     * the ISO and DUMP solenoids return to rest while the pump briefly continues
+     * to evacuate the low-pressure accumulator (Lotus Service Notes JJ.12).
+     *
+     * Five seconds is an experimental setting, NOT a Lotus-prescribed duration
+     * for service bleeding. Emergency shutdown never uses this delay.
+     */
+    private suspend fun completeWheelPulseWithPumpRecovery(wheel: WheelLocation): Boolean {
+        updateMacroPhase("Returning valves to rest")
+        addSystemLog("End of ISO pulses: return DUMP and ISO to their rest positions; keep pump ON.")
+
+        addSystemLog("DUMP OFF (${wheel.dumpOffCommand}) while pump stays ON...")
+        if (!executeMacroStep(wheel.dumpOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel, requireAcknowledgement = true)) return false
+        delay(300)
+        if (checkStopRequested() || !activeTransport.isConnected) return false
+
+        addSystemLog("ISO OFF (${wheel.isoOffCommand}) while pump stays ON...")
+        if (!executeMacroStep(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel, requireAcknowledgement = true)) return false
+        delay(300)
+        if (checkStopRequested() || !activeTransport.isConnected) return false
+
+        updateMacroPhase("Accumulator recovery — pump running")
+        addSystemLog("Experimental accumulator recovery: keep pump ON for ${postPulsePumpRecoverySeconds}s.")
+        _state.update {
+            it.copy(
+                activeOperation = "Accumulator recovery (${wheel.shortName}) - pump ON",
+                timeRemainingSec = postPulsePumpRecoverySeconds
+            )
+        }
+        for (secondsLeft in postPulsePumpRecoverySeconds downTo 1) {
+            if (checkStopRequested() || !activeTransport.isConnected) return false
+            _state.update { it.copy(timeRemainingSec = secondsLeft) }
+            delay(1000)
+        }
+
+        if (checkStopRequested() || !activeTransport.isConnected) return false
+        updateMacroPhase("Stopping pump")
+        addSystemLog("Accumulator recovery interval complete: pump OFF (30 02 07 00)...")
+        if (!executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel, requireAcknowledgement = true)) return false
+        delay(300)
+        if (checkStopRequested() || !activeTransport.isConnected) return false
+
+        addSystemLog("Confirming pump OFF (30 02 07 00)...")
+        if (!executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel, requireAcknowledgement = true)) return false
         return true
     }
 
@@ -269,7 +362,7 @@ class BleedViewModel(
         try {
             _state.update {
                 it.copy(
-                    activeOperation = "ARRESTO EMERGENZA IN CORSO...",
+                    activeOperation = "EMERGENCY STOP IN PROGRESS...",
                     executionState = BleedExecState.STOPPING
                 )
             }
@@ -355,7 +448,7 @@ class BleedViewModel(
         val currentWheel = _state.value.selectedWheel
         _state.update {
             it.copy(
-                activeOperation = "ARRESTO EMERGENZA IN CORSO...",
+                activeOperation = "EMERGENCY STOP IN PROGRESS...",
                 executionState = BleedExecState.STOPPING
             )
         }
@@ -373,7 +466,13 @@ class BleedViewModel(
     }
 
     fun runWheelBleedPulseTestMacro(wheel: WheelLocation) {
-        if (_state.value.isRunningSequence || checkStopRequested()) return
+        if (_state.value.isRunningSequence || checkStopRequested() ||
+            _state.value.executionState in setOf(
+                BleedExecState.STOP_UNCONFIRMED,
+                BleedExecState.ERROR,
+                BleedExecState.COMPLETED_UNVERIFIED
+            )
+        ) return
 
         activeJob = viewModelScope.launch {
             // Non-invasive capability check (sends 0 bytes to ECU)
@@ -385,8 +484,11 @@ class BleedViewModel(
             _state.update {
                 it.copy(
                     activeOperation = "Bleeding Test (${wheel.shortName})",
-                    timeRemainingSec = 9,
+                    timeRemainingSec = 0,
                     isRunningSequence = true,
+                    macroPhase = "Initializing adapter",
+                    pulseCycle = 0,
+                    hasUnconfirmedCommands = false,
                     executionState = BleedExecState.RUNNING
                 )
             }
@@ -398,6 +500,7 @@ class BleedViewModel(
                 executeSafeFastElm327Init()
                 if (checkStopRequested()) return@launch
 
+                updateMacroPhase("Preparing DUMP valve")
                 // 1. Send DUMP ON
                 addSystemLog("Step 1/5: Opening DUMP valve (${wheel.dumpOnCommand})")
                 if (!executeMacroStep(wheel.dumpOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -407,6 +510,7 @@ class BleedViewModel(
                 delay(1000)
                 if (checkStopRequested()) return@launch
 
+                updateMacroPhase("Starting ABS pump")
                 // 3. Send ABS Pump ON
                 addSystemLog("Step 3/5: Starting ABS Pump ON (30 02 07 01)")
                 if (!executeMacroStep("30 02 07 01", CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -419,6 +523,7 @@ class BleedViewModel(
                 // 5. 6 Pulsation cycles on ISO valve (300ms ON / 300ms OFF)
                 addSystemLog("Step 5/5: Executing 6 hydraulic pulsation cycles on ISO valve (300ms ON / 300ms OFF)...")
                 for (cycle in 1..6) {
+                    updateMacroPhase("ISO pulsing", cycle)
                     if (checkStopRequested()) return@launch
                     addSystemLog("Pulse $cycle/6: ISO ON (${wheel.isoOnCommand})")
                     if (!executeMacroStep(wheel.isoOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -432,23 +537,9 @@ class BleedViewModel(
 
                 if (checkStopRequested()) return@launch
 
-                // Turn off all actuators safely with 300ms gap between shutdown commands
-                addSystemLog("Turning off all actuators safely (Pump OFF -> DUMP OFF -> ISO OFF)...")
-
-                addSystemLog("Shutting down ABS Pump (30 02 07 00)...")
-                executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel)
-                delay(300)
-
-                addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})...")
-                executeMacroStep(wheel.dumpOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel)
-                delay(300)
-
-                addSystemLog("Closing ISO valve (${wheel.isoOffCommand})...")
-                executeMacroStep(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel)
-                delay(300)
-
-                // Safety confirmation
-                executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel)
+                // Normal shutdown: valve solenoids OFF, then 5s pump recovery, then pump OFF.
+                // Any failure or emergency stop falls through to coordinated immediate shutdown.
+                if (!completeWheelPulseWithPumpRecovery(wheel)) return@launch
 
                 addSystemLog("--- Completed Hydraulic Pulse Test Macro for ${wheel.shortName} ---")
                 _state.update {
@@ -456,7 +547,8 @@ class BleedViewModel(
                         activeOperation = null,
                         timeRemainingSec = 0,
                         isRunningSequence = false,
-                        executionState = BleedExecState.IDLE
+                        executionState = if (it.hasUnconfirmedCommands) BleedExecState.COMPLETED_UNVERIFIED else BleedExecState.COMPLETED,
+                        macroPhase = if (it.hasUnconfirmedCommands) "Completed — missing acknowledgements" else "Sequence completed"
                     )
                 }
                 completedNormally = true
@@ -472,7 +564,13 @@ class BleedViewModel(
     }
 
     fun runWheelBleedPulseTestMacroSlow(wheel: WheelLocation) {
-        if (_state.value.isRunningSequence || checkStopRequested()) return
+        if (_state.value.isRunningSequence || checkStopRequested() ||
+            _state.value.executionState in setOf(
+                BleedExecState.STOP_UNCONFIRMED,
+                BleedExecState.ERROR,
+                BleedExecState.COMPLETED_UNVERIFIED
+            )
+        ) return
 
         activeJob = viewModelScope.launch {
             // Non-invasive capability check (sends 0 bytes to ECU)
@@ -484,8 +582,11 @@ class BleedViewModel(
             _state.update {
                 it.copy(
                     activeOperation = "Bleeding Test Slow (${wheel.shortName})",
-                    timeRemainingSec = 18,
+                    timeRemainingSec = 0,
                     isRunningSequence = true,
+                    macroPhase = "Initializing adapter",
+                    pulseCycle = 0,
+                    hasUnconfirmedCommands = false,
                     executionState = BleedExecState.RUNNING
                 )
             }
@@ -497,6 +598,7 @@ class BleedViewModel(
                 executeSlowElm327Init()
                 if (checkStopRequested()) return@launch
 
+                updateMacroPhase("Preparing DUMP valve")
                 // 1. Send DUMP ON
                 addSystemLog("Step 1/5: Opening DUMP valve (${wheel.dumpOnCommand})")
                 if (!executeMacroStep(wheel.dumpOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -506,6 +608,7 @@ class BleedViewModel(
                 delay(1000)
                 if (checkStopRequested()) return@launch
 
+                updateMacroPhase("Starting ABS pump")
                 // 3. Send ABS Pump ON
                 addSystemLog("Step 3/5: Starting ABS Pump ON (30 02 07 01)")
                 if (!executeMacroStep("30 02 07 01", CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -518,6 +621,7 @@ class BleedViewModel(
                 // 5. 6 Pulsation cycles on ISO valve (300ms ON / 300ms OFF)
                 addSystemLog("Step 5/5: Executing 6 hydraulic pulsation cycles on ISO valve (300ms ON / 300ms OFF)...")
                 for (cycle in 1..6) {
+                    updateMacroPhase("ISO pulsing", cycle)
                     if (checkStopRequested()) return@launch
                     addSystemLog("Pulse $cycle/6: ISO ON (${wheel.isoOnCommand})")
                     if (!executeMacroStep(wheel.isoOnCommand, CommandCategory.ACTUATOR_CONTROL, wheel)) return@launch
@@ -531,23 +635,9 @@ class BleedViewModel(
 
                 if (checkStopRequested()) return@launch
 
-                // Turn off all actuators safely with 300ms gap between shutdown commands
-                addSystemLog("Turning off all actuators safely (Pump OFF -> DUMP OFF -> ISO OFF)...")
-
-                addSystemLog("Shutting down ABS Pump (30 02 07 00)...")
-                executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel)
-                delay(300)
-
-                addSystemLog("Closing DUMP valve (${wheel.dumpOffCommand})...")
-                executeMacroStep(wheel.dumpOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel)
-                delay(300)
-
-                addSystemLog("Closing ISO valve (${wheel.isoOffCommand})...")
-                executeMacroStep(wheel.isoOffCommand, CommandCategory.ACTUATOR_CONTROL, wheel)
-                delay(300)
-
-                // Safety confirmation
-                executeMacroStep("30 02 07 00", CommandCategory.ACTUATOR_CONTROL, wheel)
+                // Normal shutdown: valve solenoids OFF, then 5s pump recovery, then pump OFF.
+                // Any failure or emergency stop falls through to coordinated immediate shutdown.
+                if (!completeWheelPulseWithPumpRecovery(wheel)) return@launch
 
                 addSystemLog("--- Completed Hydraulic Pulse Test Macro (Slow) for ${wheel.shortName} ---")
                 _state.update {
@@ -555,7 +645,8 @@ class BleedViewModel(
                         activeOperation = null,
                         timeRemainingSec = 0,
                         isRunningSequence = false,
-                        executionState = BleedExecState.IDLE
+                        executionState = if (it.hasUnconfirmedCommands) BleedExecState.COMPLETED_UNVERIFIED else BleedExecState.COMPLETED,
+                        macroPhase = if (it.hasUnconfirmedCommands) "Completed — missing acknowledgements" else "Sequence completed"
                     )
                 }
                 completedNormally = true
@@ -578,63 +669,92 @@ class BleedViewModel(
         runWheelBleedPulseTestMacroSlow(wheel)
     }
 
+    /**
+     * Timed diagnostic actuator test. Unlike unsupervised manual ON commands,
+     * this enforces a finite duration and verifies OFF acknowledgement.
+     * Any unconfirmed command triggers the immediate coordinated stop path.
+     */
     fun runBleedSequence(name: String, onCommand: String, offCommand: String, durationSec: Int) {
-        if (!activeTransport.canExecute(CommandCategory.ACTUATOR_CONTROL)) {
-            addSystemLog("USB is read-only on real hardware: actuator commands are disabled.")
+        if (durationSec !in 1..15) {
+            addSystemLog("Manual test duration out of range (1..15 seconds).")
             return
         }
-        if (_state.value.isRunningSequence || checkStopRequested()) return
+        if (!activeTransport.canExecute(CommandCategory.ACTUATOR_CONTROL)) {
+            addSystemLog("Actuator control disabled or adapter disconnected.")
+            return
+        }
+        if (_state.value.isRunningSequence || checkStopRequested() ||
+            _state.value.executionState in setOf(
+                BleedExecState.STOP_UNCONFIRMED,
+                BleedExecState.ERROR,
+                BleedExecState.COMPLETED_UNVERIFIED
+            )
+        ) return
+        val wheel = _state.value.selectedWheel
 
         activeJob = viewModelScope.launch {
-            var completedNormally = false
+            var stoppedAndConfirmed = false
             try {
                 _state.update {
                     it.copy(
                         activeOperation = name,
+                        macroPhase = "Timed manual test",
+                        pulseCycle = 0,
                         timeRemainingSec = durationSec,
                         isRunningSequence = true,
                         executionState = BleedExecState.RUNNING
                     )
                 }
-                addSystemLog("Starting $name sequence...")
-
+                addSystemLog("Starting timed manual test: $name (${durationSec}s).")
                 addSentLog(onCommand)
-                activeTransport.executeCommand(onCommand, CommandCategory.ACTUATOR_CONTROL)
+                val onResult = activeTransport.executeCommand(onCommand, CommandCategory.ACTUATOR_CONTROL)
+                if (!onResult.isSuccess) {
+                    addSystemLog("Manual ON not acknowledged: ${onResult.status}. Triggering stop.")
+                    return@launch
+                }
 
-                for (i in durationSec downTo 1) {
-                    if (checkStopRequested()) return@launch
-                    _state.update { it.copy(timeRemainingSec = i) }
+                for (secondsLeft in durationSec downTo 1) {
+                    if (checkStopRequested() || !activeTransport.isConnected) return@launch
+                    _state.update { it.copy(timeRemainingSec = secondsLeft) }
                     delay(1000)
                 }
-                completedNormally = true
+
+                addSentLog(offCommand)
+                val offResult = activeTransport.executeCommand(offCommand, CommandCategory.ACTUATOR_CONTROL)
+                if (!offResult.isSuccess) {
+                    addSystemLog("Manual OFF not acknowledged: ${offResult.status}. Triggering stop.")
+                    return@launch
+                }
+
+                addSentLog("30 02 07 00")
+                val pumpResult = activeTransport.executeCommand("30 02 07 00", CommandCategory.ACTUATOR_CONTROL)
+                if (!pumpResult.isSuccess) {
+                    addSystemLog("Pump OFF not acknowledged: ${pumpResult.status}. Triggering stop.")
+                    return@launch
+                }
+
+                addSentLog("30 03 07 00")
+                val relayResult = activeTransport.executeCommand("30 03 07 00", CommandCategory.ACTUATOR_CONTROL)
+                if (!relayResult.isSuccess) {
+                    addSystemLog("Relay OFF not acknowledged: ${relayResult.status}. Triggering stop.")
+                    return@launch
+                }
+
+                stoppedAndConfirmed = true
+                _state.update {
+                    it.copy(
+                        activeOperation = null, timeRemainingSec = 0,
+                        isRunningSequence = false,
+                        executionState = BleedExecState.COMPLETED,
+                        macroPhase = "Manual test completed"
+                    )
+                }
+                addSystemLog("Manual test OFF commands acknowledged.")
             } catch (e: CancellationException) {
-                addSystemLog("$name sequence cancelled.")
+                addSystemLog("Timed manual test interrupted.")
                 throw e
             } finally {
-                if (!completedNormally) {
-                    executeCoordinatedStop(_state.value.selectedWheel)
-                } else {
-                    withContext(NonCancellable) {
-                        addSystemLog("Stopping $name components...")
-                        addSentLog(offCommand)
-                        activeTransport.executeCommand(offCommand, CommandCategory.ACTUATOR_CONTROL)
-                        delay(200)
-                        addSentLog("30 02 07 00")
-                        activeTransport.executeCommand("30 02 07 00", CommandCategory.ACTUATOR_CONTROL)
-                        delay(200)
-                        addSentLog("30 03 07 00")
-                        activeTransport.executeCommand("30 03 07 00", CommandCategory.ACTUATOR_CONTROL)
-                        addSystemLog("Finished $name sequence.")
-                        _state.update {
-                            it.copy(
-                                activeOperation = null,
-                                timeRemainingSec = 0,
-                                isRunningSequence = false,
-                                executionState = BleedExecState.IDLE
-                            )
-                        }
-                    }
-                }
+                if (!stoppedAndConfirmed) executeCoordinatedStop(wheel)
             }
         }
     }

@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -13,12 +14,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -129,29 +133,58 @@ fun MainApp(
     liveDataViewModel: LiveDataViewModel,
     bleedViewModel: BleedViewModel
 ) {
+    val navController = rememberNavController()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    val navController = rememberNavController()
-    
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route ?: "home"
+    val snackbar = remember { SnackbarHostState() }
+    val navEntry by navController.currentBackStackEntryAsState()
+    val route = navEntry?.destination?.route ?: "home"
+
+    val bleedState by bleedViewModel.state.collectAsState()
+    val connectionState by connectionViewModel.state.collectAsState()
+    val operationActive = bleedState.isRunningSequence ||
+        bleedState.executionState == com.lotus.abs.ui.viewmodel.BleedExecState.STOPPING
 
     val menuItems = listOf(
         Triple("home", "Home", Icons.Default.Home),
-        Triple("connection", "Device Connection", Icons.Default.Bluetooth),
+        Triple("connection", "Connection", Icons.Default.Bluetooth),
         Triple("live_data", "Live Data", Icons.Default.Speed),
-        Triple("dtc", "DTC Errors", Icons.Default.Warning),
-        Triple("bleed", "Spurgo TEST FAST", Icons.Default.Build),
-        Triple("bleed_slow", "Spurgo TEST SLOW", Icons.Default.Build)
+        Triple("dtc", "DTC Diagnostics", Icons.Default.Warning),
+        Triple("bleed", "ABS Bleeding", Icons.Default.Build)
     )
+
+    val navigateTo: (String) -> Unit = { destination ->
+        if (operationActive && destination != route) {
+            scope.launch { snackbar.showSnackbar("Bleeding routine active. Press EMERGENCY STOP before switching screens.") }
+        } else if (destination == route) {
+            if (destination == "bleed" && !operationActive) bleedViewModel.selectWheel(null)
+        } else {
+            if (destination == "bleed") bleedViewModel.selectWheel(null)
+            if (destination == "home") {
+                if (!navController.popBackStack("home", inclusive = false)) {
+                    navController.navigate("home") { launchSingleTop = true }
+                }
+            } else {
+                navController.navigate(destination) {
+                    popUpTo("home") { inclusive = false }
+                    launchSingleTop = true
+                }
+            }
+        }
+        scope.launch { drawerState.close() }
+    }
+
+    // Guard system Back while any actuator routine is active. The nested
+    // wheel-detail BackHandler handles its own disabled Back path as well.
+    BackHandler(enabled = operationActive) {
+        scope.launch { snackbar.showSnackbar("ABS operation active. Press EMERGENCY STOP before leaving.") }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = !operationActive,
         drawerContent = {
-            ModalDrawerSheet(
-                drawerContainerColor = MaterialTheme.colorScheme.surface
-            ) {
-                // Drawer Header
+            ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surface) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -161,90 +194,68 @@ fun MainApp(
                         contentDescription = "Lotus Logo",
                         modifier = Modifier.size(40.dp)
                     )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                "LOTUS ",
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontFamily = FontFamily.SansSerif,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "ABS",
-                                color = com.lotus.abs.ui.theme.LotusYellow,
-                                fontSize = 20.sp,
-                                fontFamily = FontFamily.SansSerif,
-                                fontWeight = FontWeight.Black,
-                                fontStyle = FontStyle.Italic
-                            )
-                        }
-                    }
+                    Spacer(Modifier.width(16.dp))
+                    Text("LOTUS ", fontSize = 20.sp, fontWeight = FontWeight.Black)
+                    Text("ABS", fontSize = 20.sp, fontWeight = FontWeight.Black, color = com.lotus.abs.ui.theme.LotusYellow)
                 }
-                
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
-                menuItems.forEach { (route, label, icon) ->
+                menuItems.forEach { (target, label, icon) ->
                     NavigationDrawerItem(
-                        icon = { Icon(icon, contentDescription = label) },
-                        label = { Text(label, fontWeight = FontWeight.Bold) },
-                        selected = currentRoute == route,
-                        onClick = {
-                            if (currentRoute != route) {
-                                navController.navigate(route) {
-                                    popUpTo("home") {
-                                        inclusive = (route == "home")
-                                    }
-                                    launchSingleTop = true
-                                }
-                            }
-                            scope.launch { drawerState.close() }
-                        },
-                        colors = NavigationDrawerItemDefaults.colors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            unselectedContainerColor = MaterialTheme.colorScheme.surface,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                        icon = { Icon(icon, contentDescription = null) },
+                        label = { Text(label, fontWeight = FontWeight.SemiBold) },
+                        selected = route == target,
+                        onClick = { navigateTo(target) },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
                     )
                 }
             }
         }
     ) {
         Scaffold(
+            snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
-                if (currentRoute != "home") {
-                    TopAppBar(
-                        title = { Text(menuItems.find { it.first == currentRoute }?.second ?: "Lotus ABS", fontWeight = FontWeight.Bold) },
-                        navigationIcon = {
+                TopAppBar(
+                    title = {
+                        if (route == "home") {
+                            Text("LOTUS ABS", fontWeight = FontWeight.Black,
+                                color = com.lotus.abs.ui.theme.LotusYellow)
+                        } else {
+                            Text(menuItems.firstOrNull { it.first == route }?.second ?: "Lotus ABS",
+                                fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    navigationIcon = {
+                        if (route == "home") {
                             IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Default.Menu, contentDescription = "Menu")
+                                Icon(Icons.Default.Menu, contentDescription = "Open navigation menu")
                             }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.background,
-                            titleContentColor = MaterialTheme.colorScheme.primary,
-                            navigationIconContentColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                } else {
-                    // Custom transparent TopAppBar for Home screen
-                    TopAppBar(
-                        title = { },
-                        navigationIcon = {
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                        } else {
+                            IconButton(
+                                onClick = { navigateTo("home") },
+                                enabled = !operationActive
+                            ) {
+                                Icon(Icons.Default.Home, contentDescription = "Return to Home")
                             }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color.Transparent
-                        )
+                        }
+                    },
+                    actions = {
+                        if (route != "home") {
+                            IconButton(
+                                onClick = { scope.launch { drawerState.open() } },
+                                enabled = !operationActive
+                            ) {
+                                Icon(Icons.Default.Menu, contentDescription = "Open navigation menu")
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        titleContentColor = MaterialTheme.colorScheme.primary,
+                        navigationIconContentColor = MaterialTheme.colorScheme.primary,
+                        actionIconContentColor = MaterialTheme.colorScheme.primary
                     )
-                }
+                )
             }
         ) { innerPadding ->
             NavHost(
@@ -253,22 +264,23 @@ fun MainApp(
                 modifier = Modifier.padding(innerPadding)
             ) {
                 composable("home") {
-                    HomeScreen(navController)
+                    HomeScreen(
+                        onNavigate = navigateTo,
+                        isConnected = connectionState.connectionStatus == BluetoothManager.ConnectionState.CONNECTED,
+                        connectionType = if (connectionState.selectedTransport == com.lotus.abs.ui.viewmodel.TransportType.USB)
+                            "USB KKL 409.1" else "Bluetooth ELM327"
+                    )
                 }
-                composable("connection") {
-                    ConnectionScreen(connectionViewModel)
-                }
-                composable("live_data") {
-                    LiveDataScreen(liveDataViewModel)
-                }
-                composable("dtc") {
-                    DiagnosticsScreen(diagnosticsViewModel)
-                }
+                composable("connection") { ConnectionScreen(connectionViewModel, onBleed = { navigateTo("bleed") }) }
+                composable("live_data") { LiveDataScreen(liveDataViewModel) }
+                composable("dtc") { DiagnosticsScreen(diagnosticsViewModel) }
                 composable("bleed") {
-                    BleedScreen(bleedViewModel, isSlowMode = false)
-                }
-                composable("bleed_slow") {
-                    BleedScreen(bleedViewModel, isSlowMode = true)
+                    BleedScreen(
+                        viewModel = bleedViewModel,
+                        onOpenConnection = { navigateTo("connection") },
+                        isAdapterInitializing = connectionState.isInitializing,
+                        initializationFailed = connectionState.initializationError
+                    )
                 }
             }
         }
