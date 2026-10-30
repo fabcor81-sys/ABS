@@ -278,7 +278,8 @@ fun MainApp(
                     BleedScreen(
                         viewModel = bleedViewModel,
                         onOpenConnection = { navigateTo("connection") },
-                        isAdapterInitializing = connectionState.isInitializing
+                        isAdapterInitializing = connectionState.isInitializing,
+                        initializationFailed = connectionState.initializationError
                     )
                 }
             }
