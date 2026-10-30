@@ -51,6 +51,7 @@ fun LiveDataScreen(viewModel: LiveDataViewModel) {
             )
             Button(
                 onClick = { viewModel.togglePolling() },
+                enabled = state.isConnected || state.isPolling,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
@@ -69,6 +70,17 @@ fun LiveDataScreen(viewModel: LiveDataViewModel) {
                 )
             }
         }
+
+        Text(
+            text = when {
+                !state.isConnected -> "Adattatore scollegato — dati non aggiornati"
+                state.isPolling -> "Acquisizione attiva • ultimo dato alle ${state.lastUpdated}"
+                else -> "Acquisizione ferma • ultima lettura: ${state.lastUpdated}"
+            },
+            fontSize = 12.sp,
+            color = if (state.isPolling) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
@@ -121,7 +133,7 @@ fun DataCard(title: String, value: String, unit: String, modifier: Modifier = Mo
             Text(title, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(value, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 28.sp)
+                Text(value, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 26.sp)
                 Text(" $unit", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
             }
         }
