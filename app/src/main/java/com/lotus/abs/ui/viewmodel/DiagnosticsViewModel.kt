@@ -3,6 +3,9 @@ package com.lotus.abs.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lotus.abs.bluetooth.BluetoothManager
+import com.lotus.abs.transport.CommandCategory
+import com.lotus.abs.transport.CommandStatus
+import kotlinx.coroutines.flow.update
 import com.lotus.abs.data.database.LotusAbsDatabase
 import com.lotus.abs.data.entity.DTCRecord
 import com.lotus.abs.obd2.OBD2Parser
@@ -29,6 +32,8 @@ data class DiagnosticsState(
     val customCommand: String = "",
     val dtcList: List<DTCRecord> = emptyList(),
     val isSending: Boolean = false,
+    val lastActionMessage: String? = null,
+    val lastActionSuccess: Boolean = false,
     val connectionState: BluetoothManager.ConnectionState = BluetoothManager.ConnectionState.DISCONNECTED
 )
 
@@ -121,33 +126,83 @@ class DiagnosticsViewModel(
         }
     }
 
+    // Raw terminal commands are intentionally read-only. Clearing DTCs has a
+    // separate confirmation flow and actuator commands are only exposed by the
+    // guarded Bleed screen.
     fun sendCommand(command: String) {
+        val normalized = command.replace(" ", "").uppercase(Locale.US)
+        if (!listOf("18", "19", "1A", "21", "22").any { normalized.startsWith(it) }) {
+            val message = "Comando non consentito nel terminale di sola lettura."
+            addErrorLog(message)
+            _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
+            return
+        }
+        if (_state.value.isSending) return
         viewModelScope.launch {
             if (_state.value.connectionState != BluetoothManager.ConnectionState.CONNECTED) {
-                addErrorLog("Not connected to ELM327/Bluetooth device. Connect on Home tab first.")
+                val message = "Dispositivo scollegato: collega prima l'adattatore."
+                addErrorLog(message)
+                _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
+                return@launch
             }
+
+            _state.update { it.copy(isSending = true, lastActionMessage = null) }
             addSentLog(command)
-            _state.emit(_state.value.copy(isSending = true))
             try {
-                bluetoothManager.sendCommand(command)
+                val result = bluetoothManager.executeCommand(command, CommandCategory.READ_ONLY)
+                val success = result.status == CommandStatus.ACKNOWLEDGED && result.isSuccess
+                val message = if (success) {
+                    "Comando diagnostico confermato dalla ECU."
+                } else {
+                    "Risposta non confermata: ${result.status} (${result.statusText})."
+                }
+                _state.update { it.copy(lastActionMessage = message, lastActionSuccess = success) }
+                if (!success) addErrorLog(message) else addSystemLog(message)
             } catch (e: Exception) {
-                addErrorLog("Failed to send command '$command': ${e.message}")
+                val message = "Invio fallito: ${e.message}"
+                addErrorLog(message)
+                _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
             } finally {
-                _state.emit(_state.value.copy(isSending = false))
+                _state.update { it.copy(isSending = false) }
             }
         }
     }
 
     fun clearTerminal() {
-        _state.value = _state.value.copy(terminalLog = emptyList())
-        addSystemLog("Terminal log cleared.")
+        _state.update { it.copy(terminalLog = emptyList()) }
+        addSystemLog("Terminale ripulito.")
     }
 
     fun clearAllDTCs() {
+        if (_state.value.isSending) return
         viewModelScope.launch {
-            sendCommand("14 FF 00")
-            dtcDao.clearAll()
-            addSystemLog("Cancellazione codici guasto (DTC) eseguita.")
+            if (_state.value.connectionState != BluetoothManager.ConnectionState.CONNECTED) {
+                val message = "Nessuna connessione: impossibile cancellare i DTC."
+                addErrorLog(message)
+                _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
+                return@launch
+            }
+            _state.update { it.copy(isSending = true, lastActionMessage = null) }
+            try {
+                addSentLog("14 FF 00")
+                val result = bluetoothManager.executeCommand("14 FF 00", CommandCategory.READ_ONLY)
+                val confirmed = result.status == CommandStatus.ACKNOWLEDGED && result.isSuccess
+                if (confirmed) {
+                    dtcDao.clearAll()
+                    addSystemLog("Cancellazione DTC confermata dalla ECU. Cronologia locale pulita.")
+                    _state.update { it.copy(lastActionMessage = "Cancellazione DTC confermata dalla ECU.", lastActionSuccess = true) }
+                } else {
+                    val message = "DTC NON cancellati: ECU non ha confermato (${result.status}). Cronologia preservata."
+                    addErrorLog(message)
+                    _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
+                }
+            } catch (e: Exception) {
+                val message = "Errore cancellazione DTC: ${e.message}. Cronologia preservata."
+                addErrorLog(message)
+                _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
+            } finally {
+                _state.update { it.copy(isSending = false) }
+            }
         }
     }
 
@@ -187,10 +242,7 @@ class DiagnosticsViewModel(
         viewModelScope.launch {
             try {
                 val dtcCodes = OBD2Parser.parseDTC(response)
-                if (response.contains("CLEARED") || response.contains("44 FF")) {
-                    dtcDao.clearAll()
-                    addSystemLog("Database DTC azzerato.")
-                } else if (dtcCodes.isNotEmpty()) {
+                if (dtcCodes.isNotEmpty()) {
                     dtcCodes.forEach { rawCode ->
                         val normalizedCode = normalizeDTC(rawCode)
                         val dtcRecord = DTCRecord(
