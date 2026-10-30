@@ -85,9 +85,9 @@ private fun BleedSetupScreen(
             .verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("Spurgo ABS assistito", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text("Assisted ABS Bleeding", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text(
-            "Scegli una ruota e la modalità di comunicazione. La macro esegue sei cicli ISO e 5 secondi sperimentali di recupero pompa.",
+            "Select one wheel and an adapter initialization mode. The routine performs six ISO cycles and an experimental 5-second pump recovery interval.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp
         )
@@ -95,29 +95,29 @@ private fun BleedSetupScreen(
         BleedOutcome(state)
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (connected) "Adattatore collegato" else "Adattatore non collegato",
+                Text(if (connected) "Adapter connected" else "Adapter disconnected",
                     fontWeight = FontWeight.Bold,
                     color = if (connected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
                 Text(
                     when {
-                        !connected -> "Collega un adattatore prima di eseguire comandi ABS."
-                        !actuatorAvailable -> "Il controllo attuatori non è abilitato su questo trasporto. Puoi consultare la procedura, ma non avviarla."
-                        else -> "Controllo attuatori disponibile. La risposta ECU verrà verificata durante la macro."
+                        !connected -> "Connect an adapter before sending ABS commands."
+                        !actuatorAvailable -> "Actuator control is not enabled for this transport. You may review the procedure, but cannot start it."
+                        else -> "Actuator control is available. ECU responses will be checked during the routine."
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
                 if (!connected) {
-                    TextButton(onClick = onOpenConnection) { Text("Vai alla connessione") }
+                    TextButton(onClick = onOpenConnection) { Text("Go to Connection") }
                 }
             }
         }
 
-        Text("1. Seleziona la ruota", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text("1. Select wheel", fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Image(
                 painter = painterResource(R.drawable.exige_s2_top),
-                contentDescription = "Lotus Exige S2 vista dall'alto, anteriore in alto",
+                contentDescription = "Lotus Exige S2 top view, front at the top",
                 modifier = Modifier.fillMaxWidth().height(175.dp).padding(8.dp),
                 alignment = Alignment.Center
             )
@@ -133,7 +133,7 @@ private fun BleedSetupScreen(
             }
         }
 
-        Text("2. Inizializzazione adattatore", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text("2. Adapter initialization", fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             FilterChip(
                 selected = !state.slowMode, onClick = { onChooseMode(false) },
@@ -145,7 +145,7 @@ private fun BleedSetupScreen(
             )
         }
         Text(
-            "FAST INIT: pause di inizializzazione più brevi. SLOW INIT: pause di inizializzazione più lunghe. Entrambe eseguono gli stessi sei cicli ISO e lo stesso recupero pompa.",
+            "FAST INIT uses shorter adapter setup delays; SLOW INIT uses longer delays. Both modes use the same six ISO pulses and pump recovery interval.",
             color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
         )
         Button(
@@ -154,10 +154,10 @@ private fun BleedSetupScreen(
             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
             colors = ButtonDefaults.buttonColors(containerColor = LotusYellow, contentColor = Color.Black)
         ) {
-            Text("CONTINUA E VERIFICA", fontWeight = FontWeight.Black)
+            Text("CONTINUE TO REVIEW", fontWeight = FontWeight.Black)
         }
         Text(
-            "Nota: la procedura diagnostica Lotus Scan originale prevede tutti e quattro gli spurghi aperti. Questa variante a singola ruota non è validata come equivalente.",
+            "Note: The original Lotus Scan bleeding procedure requires all four caliper bleed nipples open. This single-wheel variant has not been validated as equivalent.",
             color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
         )
     }
@@ -182,10 +182,10 @@ private fun WheelChoice(
             Text(wheel.shortName, fontWeight = FontWeight.Black, fontSize = 17.sp)
             Text(
                 when (wheel) {
-                    WheelLocation.FRONT_LEFT -> "Anteriore SX"
-                    WheelLocation.FRONT_RIGHT -> "Anteriore DX"
-                    WheelLocation.REAR_LEFT -> "Posteriore SX"
-                    WheelLocation.REAR_RIGHT -> "Posteriore DX"
+                    WheelLocation.FRONT_LEFT -> "Front Left"
+                    WheelLocation.FRONT_RIGHT -> "Front Right"
+                    WheelLocation.REAR_LEFT -> "Rear Left"
+                    WheelLocation.REAR_RIGHT -> "Rear Right"
                 },
                 fontSize = 11.sp, textAlign = TextAlign.Center
             )
@@ -213,7 +213,7 @@ private fun WheelDetailScreen(
     val mode = if (state.slowMode) "SLOW INIT" else "FAST INIT"
 
     val attemptBack = {
-        if (busy) Toast.makeText(context, "Arresta prima la macro per tornare indietro", Toast.LENGTH_SHORT).show()
+        if (busy) Toast.makeText(context, "Stop the active routine before going back", Toast.LENGTH_SHORT).show()
         else onBack()
     }
     BackHandler(enabled = true) { attemptBack() }
@@ -222,8 +222,8 @@ private fun WheelDetailScreen(
         val requested = manualRequest!!
         AlertDialog(
             onDismissRequest = { manualRequest = null },
-            title = { Text("Conferma test manuale $requested") },
-            text = { Text("Azionare la valvola $requested della ruota ${wheel.shortName} per 1 secondo? Lo spegnimento verrà richiesto e verificato.") },
+            title = { Text("Confirm $requested manual test") },
+            text = { Text("Activate the $requested valve on wheel ${wheel.shortName} for 1 second? The app will request and verify shutdown.") },
             confirmButton = {
                 Button(onClick = {
                     manualRequest = null
@@ -233,37 +233,37 @@ private fun WheelDetailScreen(
                         viewModel.runBleedSequence("DUMP ${wheel.shortName}", wheel.dumpOnCommand, wheel.dumpOffCommand, 1)
                     }
                 }, enabled = actuatorAvailable && !busy && !requiresReview) {
-                    Text("CONFERMA TEST")
+                    Text("CONFIRM TEST")
                 }
             },
-            dismissButton = { TextButton(onClick = { manualRequest = null }) { Text("Annulla") } }
+            dismissButton = { TextButton(onClick = { manualRequest = null }) { Text("Cancel") } }
         )
     }
 
     if (confirmAcknowledge) {
         AlertDialog(
             onDismissRequest = { confirmAcknowledge = false },
-            title = { Text("Esito ABS non verificato") },
-            text = { Text("Confermi di aver verificato fisicamente l'impianto frenante e di voler sbloccare nuovi comandi? La conferma non certifica la sicurezza del circuito.") },
+            title = { Text("ABS outcome not verified") },
+            text = { Text("Have you physically inspected the braking system and do you want to unlock further commands? Acknowledging this warning does not certify the hydraulic system as safe.") },
             confirmButton = {
                 Button(onClick = { confirmAcknowledge = false; viewModel.acknowledgeOutcome() }) {
-                    Text("HO ESEGUITO LA VERIFICA")
+                    Text("I HAVE INSPECTED THE SYSTEM")
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmAcknowledge = false }) { Text("Annulla") } }
+            dismissButton = { TextButton(onClick = { confirmAcknowledge = false }) { Text("Cancel") } }
         )
     }
 
     if (confirmStart) {
         AlertDialog(
             onDismissRequest = { confirmStart = false },
-            title = { Text("Conferma procedura ABS") },
+            title = { Text("Confirm ABS procedure") },
             text = {
                 Text(
-                    "Ruota: ${wheel.shortName} • Inizializzazione: $mode\n" +
-                    "6 cicli ISO da 300/300 ms; poi riposo valvole e pompa ON per 5 s.\n\n" +
-                    "Verifica livello liquido, spurgo e condizioni di lavoro. " +
-                    "I 5 secondi sono sperimentali, non prescritti dal manuale Lotus."
+                    "Wheel: ${wheel.shortName} • Initialization: $mode\n" +
+                    "6 ISO cycles (300 ms ON / 300 ms OFF); valves then return to rest while the pump remains ON for 5 s.\n\n" +
+                    "Check brake fluid level, bleed setup, and operating conditions. " +
+                    "The 5-second interval is experimental and is not prescribed by the Lotus service manual."
                 )
             },
             confirmButton = {
@@ -274,10 +274,10 @@ private fun WheelDetailScreen(
                         else viewModel.runWheelBleedPulseTestMacro(wheel)
                     },
                     enabled = actuatorAvailable && !busy && !requiresReview
-                ) { Text("CONFERMA AVVIO") }
+                ) { Text("CONFIRM START") }
             },
             dismissButton = {
-                TextButton(onClick = { confirmStart = false }) { Text("Annulla") }
+                TextButton(onClick = { confirmStart = false }) { Text("Cancel") }
             }
         )
     }
@@ -288,11 +288,11 @@ private fun WheelDetailScreen(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = attemptBack, enabled = !busy, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Torna alla selezione")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to wheel selection")
             }
             Column(Modifier.weight(1f)) {
-                Text("Spurgo ${wheel.shortName} • $mode", fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                Text("Macro pulsazione idraulica", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Bleeding ${wheel.shortName} • $mode", fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                Text("Hydraulic pulse routine", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -302,14 +302,14 @@ private fun WheelDetailScreen(
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Sequenza selezionata", fontWeight = FontWeight.Bold, color = LotusYellow)
-                        Text("DUMP ON → Pompa ON → 6 cicli ISO (300/300 ms) → DUMP OFF → ISO OFF → recupero pompa 5 s → Pompa OFF.",
+                        Text("Selected sequence", fontWeight = FontWeight.Bold, color = LotusYellow)
+                        Text("DUMP ON → Pump ON → 6 ISO pulses (300/300 ms) → DUMP OFF → ISO OFF → pump recovery 5 s → Pump OFF.",
                             fontSize = 13.sp)
                         Text(
                             if (isConnected) {
-                                if (actuatorAvailable) "Adattatore collegato • controllo attuatori disponibile"
-                                else "Controllo attuatori non disponibile: avvio bloccato"
-                            } else "Nessuna connessione: avvio bloccato",
+                                if (actuatorAvailable) "Adapter connected • actuator control available"
+                                else "Actuator control unavailable: start disabled"
+                            } else "No connection: start disabled",
                             color = if (actuatorAvailable) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                             fontSize = 12.sp
                         )
@@ -320,18 +320,18 @@ private fun WheelDetailScreen(
                 item {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(if (state.executionState == BleedExecState.STOPPING) "ARRESTO IN CORSO" else "OPERAZIONE IN CORSO",
+                            Text(if (state.executionState == BleedExecState.STOPPING) "STOPPING" else "OPERATION IN PROGRESS",
                                 fontWeight = FontWeight.Bold, color = LotusYellow)
                             Text(state.macroPhase, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                            if (state.pulseCycle > 0 && state.macroPhase == "Pulsazione ISO") {
-                                Text("Ciclo ISO ${state.pulseCycle} / 6", fontSize = 14.sp)
+                            if (state.pulseCycle > 0 && state.macroPhase == "ISO pulsing") {
+                                Text("ISO cycle ${state.pulseCycle} / 6", fontSize = 14.sp)
                                 LinearProgressIndicator(
                                     progress = { state.pulseCycle / 6f },
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
                             if (state.timeRemainingSec > 0) {
-                                Text(if (state.macroPhase.startsWith("Recupero")) "Recupero pompa: ${state.timeRemainingSec} s" else "Tempo rimanente: ${state.timeRemainingSec} s", fontWeight = FontWeight.Bold)
+                                Text(if (state.macroPhase.startsWith("Accumulator recovery")) "Pump recovery: ${state.timeRemainingSec} s" else "Time remaining: ${state.timeRemainingSec} s", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -339,14 +339,14 @@ private fun WheelDetailScreen(
             }
             item {
                 TextButton(onClick = { showFullLog = !showFullLog }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (showFullLog) "Nascondi log esteso" else "Mostra log diagnostico")
+                    Text(if (showFullLog) "Hide full log" else "Show diagnostic log")
                 }
             }
             if (showFullLog) {
                 item {
                     Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF080808))) {
                         Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            if (state.terminalLog.isEmpty()) Text("Nessun messaggio", color = Color.LightGray)
+                            if (state.terminalLog.isEmpty()) Text("No messages", color = Color.LightGray)
                             state.terminalLog.takeLast(80).forEach { entry ->
                                 Text(
                                     "[${entry.timestamp}] ${entry.text}",
@@ -361,14 +361,14 @@ private fun WheelDetailScreen(
             if (!busy) {
                 item {
                     TextButton(onClick = { showManual = !showManual }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (showManual) "Chiudi test manuali" else "Test manuali avanzati")
+                        Text(if (showManual) "Hide manual tests" else "Advanced manual tests")
                     }
                 }
                 if (showManual) {
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Attivazione limitata a 1 secondo con spegnimento automatico. Solo per diagnostica controllata.",
+                                Text("Activation is limited to 1 second, with automatic shutdown. For controlled diagnostics only.",
                                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Button(
                                     onClick = { manualRequest = "ISO" }, enabled = actuatorAvailable && !busy && !requiresReview,
@@ -395,7 +395,7 @@ private fun WheelDetailScreen(
             ) {
                 Icon(Icons.Default.Warning, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (state.executionState == BleedExecState.STOPPING) "ARRESTO IN CORSO" else "STOP EMERGENZA", fontWeight = FontWeight.Black)
+                Text(if (state.executionState == BleedExecState.STOPPING) "STOPPING" else "EMERGENCY STOP", fontWeight = FontWeight.Black)
             }
         } else {
             if (requiresReview) {
@@ -404,7 +404,7 @@ private fun WheelDetailScreen(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
                         contentColor = Color.White)
-                ) { Text("VERIFICA E SBLOCCA", fontWeight = FontWeight.Bold) }
+                ) { Text("INSPECT AND UNLOCK", fontWeight = FontWeight.Bold) }
                 Spacer(Modifier.height(6.dp))
             }
             Button(
@@ -413,7 +413,7 @@ private fun WheelDetailScreen(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = LotusYellow, contentColor = Color.Black)
             ) {
-                Text("AVVIA MACRO $mode", fontWeight = FontWeight.Black)
+                Text("START ROUTINE $mode", fontWeight = FontWeight.Black)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -423,11 +423,11 @@ private fun WheelDetailScreen(
 @Composable
 private fun BleedOutcome(state: BleedState) {
     val (headline, detail, warning) = when (state.executionState) {
-        BleedExecState.COMPLETED -> Triple("Sequenza terminata", "Comandi confermati. Verificare comunque il corretto spurgo e il pedale prima di utilizzare il veicolo.", false)
-        BleedExecState.COMPLETED_UNVERIFIED -> Triple("Sequenza terminata — risposte incomplete", "Uno o più comandi risultano solo trasmessi: lo stato fisico non è verificato.", true)
-        BleedExecState.STOPPED_CONFIRMED -> Triple("Arresto comandato e confermato", "Lo spegnimento è stato confermato dalla ECU; lo stato fisico richiede verifica.", false)
-        BleedExecState.STOP_UNCONFIRMED -> Triple("ATTENZIONE: arresto non confermato", "Non è stata ricevuta conferma completa dei comandi OFF. Verificare l'impianto prima di procedere.", true)
-        BleedExecState.ERROR -> Triple("Errore o connessione persa", "Stato attuatori non verificato. Interrompere i test e controllare il sistema.", true)
+        BleedExecState.COMPLETED -> Triple("Sequence completed", "Commands acknowledged. Verify brake bleeding and pedal feel before using the vehicle.", false)
+        BleedExecState.COMPLETED_UNVERIFIED -> Triple("Sequence completed — missing confirmations", "One or more commands were only transmitted; the physical actuator state is not verified.", true)
+        BleedExecState.STOPPED_CONFIRMED -> Triple("Stop commanded and acknowledged", "The ECU acknowledged shutdown; the physical state still requires inspection.", false)
+        BleedExecState.STOP_UNCONFIRMED -> Triple("WARNING: stop not confirmed", "OFF commands were not fully acknowledged. Inspect the system before proceeding.", true)
+        BleedExecState.ERROR -> Triple("Error or connection lost", "Actuator state not verified. Stop testing and inspect the system.", true)
         else -> return
     }
     Card(
