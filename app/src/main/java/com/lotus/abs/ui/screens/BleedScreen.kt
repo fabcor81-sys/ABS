@@ -1,206 +1,185 @@
 package com.lotus.abs.ui.screens
 
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lotus.abs.R
+import com.lotus.abs.bluetooth.BluetoothManager
+import com.lotus.abs.transport.CommandCategory
 import com.lotus.abs.ui.theme.LotusYellow
+import com.lotus.abs.ui.viewmodel.BleedExecState
+import com.lotus.abs.ui.viewmodel.BleedState
 import com.lotus.abs.ui.viewmodel.BleedViewModel
 import com.lotus.abs.ui.viewmodel.WheelLocation
 
-@Composable
-fun BleedScreen(viewModel: BleedViewModel, isSlowMode: Boolean = false) {
-    val state by viewModel.state.collectAsState()
-    val terminalListState = rememberLazyListState()
+private fun BleedState.isBusy(): Boolean =
+    isRunningSequence || executionState == BleedExecState.STOPPING
 
-    val selectedWheel = state.selectedWheel
-    if (selectedWheel != null) {
+@Composable
+fun BleedScreen(viewModel: BleedViewModel, onOpenConnection: () -> Unit) {
+    val state by viewModel.state.collectAsState()
+    val connectionStatus by viewModel.bluetoothManager.connectionState.collectAsState()
+    val connected = connectionStatus == BluetoothManager.ConnectionState.CONNECTED
+    val capable = connected && viewModel.activeTransport.canExecute(CommandCategory.ACTUATOR_CONTROL)
+
+    if (state.selectedWheel != null) {
         WheelDetailScreen(
             viewModel = viewModel,
-            wheel = selectedWheel,
-            onBack = { viewModel.selectWheel(null) },
-            isTestMode = true,
-            isSlowMode = isSlowMode
+            wheel = state.selectedWheel!!,
+            isConnected = connected,
+            actuatorAvailable = capable,
+            onBack = { viewModel.selectWheel(null) }
         )
-        return
-    }
-
-    LaunchedEffect(state.terminalLog) {
-        if (state.terminalLog.isNotEmpty()) {
-            terminalListState.animateScrollToItem(state.terminalLog.size - 1)
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
-    ) {
-        Text(
-            text = "Service / Bleed",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(bottom = 12.dp)
+    } else {
+        BleedSetupScreen(
+            state = state,
+            connected = connected,
+            actuatorAvailable = capable,
+            onChooseWheel = viewModel::selectSetupWheel,
+            onChooseMode = viewModel::setSlowMode,
+            onContinue = { state.setupWheel?.let(viewModel::selectWheel) },
+            onOpenConnection = onOpenConnection
         )
-
-        // Active operation banner with Emergency Stop
-        if (state.activeOperation != null || state.executionState == com.lotus.abs.ui.viewmodel.BleedExecState.STOPPING || state.executionState == com.lotus.abs.ui.viewmodel.BleedExecState.STOP_UNCONFIRMED) {
-            EmergencyActiveBanner(
-                activeOperation = state.activeOperation ?: "Arresto in corso...",
-                timeRemainingSec = state.timeRemainingSec,
-                executionState = state.executionState,
-                onEmergencyStop = { viewModel.emergencyStop() }
-            )
-        }
-
-        // Car Layout Diagram Box with 4 Wheel Buttons
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(vertical = 8.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            // Lotus Exige S2 Top Down Image
-            Image(
-                painter = painterResource(id = R.drawable.exige_s2_top),
-                contentDescription = "Lotus Exige S2 Top Down View",
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .aspectRatio(0.66f)
-            )
-
-            // Wheel Selection Overlay Buttons anchored to 4 corners
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 8.dp, vertical = 24.dp),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                // Top Row: Front Left (LF) & Front Right (RF)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    WheelButton(
-                        wheel = WheelLocation.FRONT_LEFT,
-                        onClick = { viewModel.selectWheel(WheelLocation.FRONT_LEFT) }
-                    )
-                    WheelButton(
-                        wheel = WheelLocation.FRONT_RIGHT,
-                        onClick = { viewModel.selectWheel(WheelLocation.FRONT_RIGHT) }
-                    )
-                }
-
-                // Bottom Row: Rear Left (LR) & Rear Right (RR)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    WheelButton(
-                        wheel = WheelLocation.REAR_LEFT,
-                        onClick = { viewModel.selectWheel(WheelLocation.REAR_LEFT) }
-                    )
-                    WheelButton(
-                        wheel = WheelLocation.REAR_RIGHT,
-                        onClick = { viewModel.selectWheel(WheelLocation.REAR_RIGHT) }
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // System General Actions
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    "Comandi Generali ABS",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Button(
-                        onClick = { viewModel.sendCommand("30 49 01") },
-                        modifier = Modifier.weight(1f).height(42.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    ) {
-                        Text("Stato Valvole", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Button(
-                        onClick = { viewModel.runBleedSequence("PUMP", "30 02 07 01", "30 02 07 00", 15) },
-                        enabled = !state.isRunningSequence,
-                        modifier = Modifier.weight(1f).height(42.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("Pompa (15s)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Button(
-                        onClick = { viewModel.runBleedSequence("RELAY", "30 03 07 01", "30 03 07 00", 15) },
-                        enabled = !state.isRunningSequence,
-                        modifier = Modifier.weight(1f).height(42.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("Relè (15s)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
     }
 }
 
 @Composable
-fun WheelButton(wheel: WheelLocation, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF1E293B),
-            contentColor = LotusYellow
+private fun BleedSetupScreen(
+    state: BleedState,
+    connected: Boolean,
+    actuatorAvailable: Boolean,
+    onChooseWheel: (WheelLocation) -> Unit,
+    onChooseMode: (Boolean) -> Unit,
+    onContinue: () -> Unit,
+    onOpenConnection: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+            .verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("Spurgo ABS assistito", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Scegli una ruota e la modalità di comunicazione. La macro esegue sei cicli ISO e 5 secondi sperimentali di recupero pompa.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 13.sp
+        )
+
+        BleedOutcome(state)
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (connected) "Adattatore collegato" else "Adattatore non collegato",
+                    fontWeight = FontWeight.Bold,
+                    color = if (connected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
+                Text(
+                    when {
+                        !connected -> "Collega un adattatore prima di eseguire comandi ABS."
+                        !actuatorAvailable -> "Il controllo attuatori non è abilitato su questo trasporto. Puoi consultare la procedura, ma non avviarla."
+                        else -> "Controllo attuatori disponibile. La risposta ECU verrà verificata durante la macro."
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp
+                )
+                if (!connected) {
+                    TextButton(onClick = onOpenConnection) { Text("Vai alla connessione") }
+                }
+            }
+        }
+
+        Text("1. Seleziona la ruota", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Image(
+                painter = painterResource(R.drawable.exige_s2_top),
+                contentDescription = "Lotus Exige S2 vista dall'alto, anteriore in alto",
+                modifier = Modifier.fillMaxWidth().height(175.dp).padding(8.dp),
+                alignment = Alignment.Center
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                WheelChoice(WheelLocation.FRONT_LEFT, state.setupWheel == WheelLocation.FRONT_LEFT, Modifier.weight(1f), onChooseWheel)
+                WheelChoice(WheelLocation.FRONT_RIGHT, state.setupWheel == WheelLocation.FRONT_RIGHT, Modifier.weight(1f), onChooseWheel)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                WheelChoice(WheelLocation.REAR_LEFT, state.setupWheel == WheelLocation.REAR_LEFT, Modifier.weight(1f), onChooseWheel)
+                WheelChoice(WheelLocation.REAR_RIGHT, state.setupWheel == WheelLocation.REAR_RIGHT, Modifier.weight(1f), onChooseWheel)
+            }
+        }
+
+        Text("2. Modalità", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilterChip(
+                selected = !state.slowMode, onClick = { onChooseMode(false) },
+                label = { Text("FAST") }, modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = state.slowMode, onClick = { onChooseMode(true) },
+                label = { Text("SLOW") }, modifier = Modifier.weight(1f)
+            )
+        }
+        Text(
+            "FAST e SLOW hanno gli stessi cicli idraulici: cambia l'inizializzazione della connessione.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+        )
+        Button(
+            onClick = onContinue,
+            enabled = state.setupWheel != null,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = LotusYellow, contentColor = Color.Black)
+        ) {
+            Text("CONTINUA E VERIFICA", fontWeight = FontWeight.Black)
+        }
+        Text(
+            "Nota: la procedura diagnostica Lotus Scan originale prevede tutti e quattro gli spurghi aperti. Questa variante a singola ruota non è validata come equivalente.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+        )
+    }
+}
+
+@Composable
+private fun WheelChoice(
+    wheel: WheelLocation,
+    selected: Boolean,
+    modifier: Modifier,
+    onClick: (WheelLocation) -> Unit
+) {
+    OutlinedButton(
+        onClick = { onClick(wheel) }, modifier = modifier.heightIn(min = 64.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) LotusYellow else MaterialTheme.colorScheme.surface,
+            contentColor = if (selected) Color.Black else MaterialTheme.colorScheme.onSurface
         ),
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(LotusYellow)),
-        modifier = Modifier
-            .width(135.dp)
-            .height(54.dp)
+        border = ButtonDefaults.outlinedButtonBorder
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(wheel.shortName, fontWeight = FontWeight.Black, fontSize = 16.sp)
+            Text(wheel.shortName, fontWeight = FontWeight.Black, fontSize = 17.sp)
             Text(
                 when (wheel) {
                     WheelLocation.FRONT_LEFT -> "Anteriore SX"
@@ -208,312 +187,214 @@ fun WheelButton(wheel: WheelLocation, onClick: () -> Unit) {
                     WheelLocation.REAR_LEFT -> "Posteriore SX"
                     WheelLocation.REAR_RIGHT -> "Posteriore DX"
                 },
-                fontSize = 10.sp,
-                color = Color.White.copy(alpha = 0.8f)
+                fontSize = 11.sp, textAlign = TextAlign.Center
             )
         }
     }
 }
 
 @Composable
-fun WheelDetailScreen(
+private fun WheelDetailScreen(
     viewModel: BleedViewModel,
     wheel: WheelLocation,
-    onBack: () -> Unit,
-    isTestMode: Boolean = false,
-    isSlowMode: Boolean = false
+    isConnected: Boolean,
+    actuatorAvailable: Boolean,
+    onBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
-    val terminalListState = rememberLazyListState()
+    val context = LocalContext.current
+    val busy = state.isBusy()
+    var confirmStart by remember { mutableStateOf(false) }
+    var showFullLog by remember { mutableStateOf(false) }
+    var showManual by remember { mutableStateOf(false) }
+    val mode = if (state.slowMode) "SLOW" else "FAST"
 
-    LaunchedEffect(state.terminalLog.size) {
-        if (state.terminalLog.isNotEmpty()) {
-            terminalListState.animateScrollToItem(state.terminalLog.size - 1)
-        }
+    val attemptBack = {
+        if (busy) Toast.makeText(context, "Arresta prima la macro per tornare indietro", Toast.LENGTH_SHORT).show()
+        else onBack()
     }
+    BackHandler(enabled = true) { attemptBack() }
 
-    val headerTitle = when {
-        isTestMode && isSlowMode -> "Bleeding Test Slow - ${wheel.title} (${wheel.shortName})"
-        isTestMode -> "Bleeding Test - ${wheel.title} (${wheel.shortName})"
-        isSlowMode -> "Bleed Slow - ${wheel.title} (${wheel.shortName})"
-        else -> "${wheel.title} (${wheel.shortName})"
+    if (confirmStart) {
+        AlertDialog(
+            onDismissRequest = { confirmStart = false },
+            title = { Text("Conferma procedura ABS") },
+            text = {
+                Text(
+                    "Ruota: ${wheel.shortName} • Modalità: $mode\n" +
+                    "6 cicli ISO da 300/300 ms; poi riposo valvole e pompa ON per 5 s.\n\n" +
+                    "Verifica livello liquido, spurgo e condizioni di lavoro. " +
+                    "I 5 secondi sono sperimentali, non prescritti dal manuale Lotus."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmStart = false
+                        if (state.slowMode) viewModel.runWheelBleedPulseTestMacroSlow(wheel)
+                        else viewModel.runWheelBleedPulseTestMacro(wheel)
+                    },
+                    enabled = actuatorAvailable && !busy
+                ) { Text("CONFERMA AVVIO") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmStart = false }) { Text("Annulla") }
+            }
+        )
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        // Header with Back Button
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Indietro",
-                    tint = MaterialTheme.colorScheme.primary
-                )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = attemptBack, enabled = !busy, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Torna alla selezione")
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            Column {
-                Text(
-                    text = headerTitle,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Text(
-                    text = if (isSlowMode) "Tempistiche rilassate (Pausa 3s tra comandi AT)" else "Tempistiche veloci ed ottimizzate",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Column(Modifier.weight(1f)) {
+                Text("Spurgo ${wheel.shortName} • $mode", fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                Text("Macro pulsazione idraulica", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
-        // Active Operation & Emergency Stop Banner
-        if (state.activeOperation != null || state.executionState == com.lotus.abs.ui.viewmodel.BleedExecState.STOPPING || state.executionState == com.lotus.abs.ui.viewmodel.BleedExecState.STOP_UNCONFIRMED) {
-            EmergencyActiveBanner(
-                activeOperation = state.activeOperation ?: "Arresto in corso...",
-                timeRemainingSec = state.timeRemainingSec,
-                executionState = state.executionState,
-                onEmergencyStop = { viewModel.emergencyStop() }
-            )
-        }
+        BleedOutcome(state)
 
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Main Wheel Bleed Macro Card
+        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(
-                            1.dp,
-                            LotusYellow.copy(alpha = 0.8f),
-                            RoundedCornerShape(12.dp)
-                        ),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Sequenza selezionata", fontWeight = FontWeight.Bold, color = LotusYellow)
+                        Text("DUMP ON → Pompa ON → 6 cicli ISO (300/300 ms) → DUMP OFF → ISO OFF → recupero pompa 5 s → Pompa OFF.",
+                            fontSize = 13.sp)
                         Text(
-                            text = if (isTestMode) "Macro Pulsazione Idraulica (${wheel.shortName})" else "Macro Spurgo Ruota (${wheel.shortName})",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = LotusYellow,
-                            modifier = Modifier.padding(bottom = 6.dp)
+                            if (isConnected) {
+                                if (actuatorAvailable) "Adattatore collegato • controllo attuatori disponibile"
+                                else "Controllo attuatori non disponibile: avvio bloccato"
+                            } else "Nessuna connessione: avvio bloccato",
+                            color = if (actuatorAvailable) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp
                         )
-                        Text(
-                            text = if (isTestMode)
-                                "DUMP ON ➔ Pump ON ➔ 6x Cicli Pulsazione ISO (300ms ON / 300ms OFF) ➔ Shutdown Sicurezza (Pump, DUMP & ISO OFF)"
-                            else if (isSlowMode)
-                                "Esecuzione con pause di 3 secondi tra comandi ATZ, SH, WM, SP, DTC."
-                            else
-                                "Esecuzione con pause ottimizzate < 2.5 secondi totali.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-
-                        Button(
-                            onClick = {
-                                when {
-                                    isTestMode && isSlowMode -> viewModel.runWheelBleedPulseTestMacroSlow(wheel)
-                                    isTestMode -> viewModel.runWheelBleedPulseTestMacro(wheel)
-                                    isSlowMode -> viewModel.runWheelBleedMacroSlow(wheel)
-                                    else -> viewModel.runWheelBleedMacro(wheel)
-                                }
-                            },
-                            enabled = !state.isRunningSequence,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = LotusYellow,
-                                contentColor = Color.Black
-                            )
-                        ) {
-                            Text(
-                                text = if (isSlowMode) "AVVIA MACRO (SLOW 3s)" else "AVVIA MACRO (FAST)",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Black
-                            )
+                    }
+                }
+            }
+            if (busy) {
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(if (state.executionState == BleedExecState.STOPPING) "ARRESTO IN CORSO" else "OPERAZIONE IN CORSO",
+                                fontWeight = FontWeight.Bold, color = LotusYellow)
+                            Text(state.macroPhase, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                            if (state.pulseCycle > 0 && state.macroPhase == "Pulsazione ISO") {
+                                Text("Ciclo ISO ${state.pulseCycle} / 6", fontSize = 14.sp)
+                                LinearProgressIndicator(
+                                    progress = { state.pulseCycle / 6f },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            if (state.timeRemainingSec > 0) {
+                                Text("Recupero pompa: ${state.timeRemainingSec} s rimanenti", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
-
-            // Manual Valve Commands
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            "Comandi Manuali Valvole",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-
-                        Text("Valvola DUMP (${wheel.shortName})", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)) {
-                            Button(
-                                onClick = { viewModel.sendCommand(wheel.dumpOnCommand) },
-                                enabled = !state.isRunningSequence,
-                                modifier = Modifier.weight(1f).height(42.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("DUMP OPEN (${wheel.dumpOnCommand})", fontSize = 10.sp) }
-
-                            Button(
-                                onClick = { viewModel.sendCommand(wheel.dumpOffCommand) },
-                                enabled = !state.isRunningSequence,
-                                modifier = Modifier.weight(1f).height(42.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("DUMP CLOSE (${wheel.dumpOffCommand})", fontSize = 10.sp) }
+                TextButton(onClick = { showFullLog = !showFullLog }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (showFullLog) "Nascondi log esteso" else "Mostra log diagnostico")
+                }
+            }
+            if (showFullLog) {
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF080808))) {
+                        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            if (state.terminalLog.isEmpty()) Text("Nessun messaggio", color = Color.LightGray)
+                            state.terminalLog.takeLast(80).forEach { entry ->
+                                Text(
+                                    "[${entry.timestamp}] ${entry.text}",
+                                    fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                                    color = Color(0xFFBDBDBD)
+                                )
+                            }
                         }
-
-                        Text("Valvola ISO (${wheel.shortName})", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-                            Button(
-                                onClick = { viewModel.sendCommand(wheel.isoOnCommand) },
-                                enabled = !state.isRunningSequence,
-                                modifier = Modifier.weight(1f).height(42.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("ISO OPEN (${wheel.isoOnCommand})", fontSize = 10.sp) }
-
-                            Button(
-                                onClick = { viewModel.sendCommand(wheel.isoOffCommand) },
-                                enabled = !state.isRunningSequence,
-                                modifier = Modifier.weight(1f).height(42.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("ISO CLOSE (${wheel.isoOffCommand})", fontSize = 10.sp) }
+                    }
+                }
+            }
+            if (!busy) {
+                item {
+                    TextButton(onClick = { showManual = !showManual }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (showManual) "Chiudi test manuali" else "Test manuali avanzati")
+                    }
+                }
+                if (showManual) {
+                    item {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Attivazione limitata a 1 secondo con spegnimento automatico. Solo per diagnostica controllata.",
+                                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Button(
+                                    onClick = {
+                                        viewModel.runBleedSequence("ISO ${wheel.shortName}", wheel.isoOnCommand, wheel.isoOffCommand, 1)
+                                    }, enabled = actuatorAvailable && !busy,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("Test ISO (1 s)") }
+                                Button(
+                                    onClick = {
+                                        viewModel.runBleedSequence("DUMP ${wheel.shortName}", wheel.dumpOnCommand, wheel.dumpOffCommand, 1)
+                                    }, enabled = actuatorAvailable && !busy,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("Test DUMP (1 s)") }
+                            }
                         }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Integrated Terminal Screen Header & Box
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "Schermo Terminale (Log)",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            IconButton(
-                onClick = { viewModel.clearTerminal() },
-                modifier = Modifier.size(28.dp)
+        Spacer(Modifier.height(8.dp))
+        if (busy) {
+            Button(
+                onClick = { viewModel.emergencyStop() },
+                enabled = state.executionState != BleedExecState.STOPPING,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFCF2626), contentColor = Color.White),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Pulisci Log",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Icon(Icons.Default.Warning, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (state.executionState == BleedExecState.STOPPING) "ARRESTO IN CORSO" else "STOP EMERGENZA", fontWeight = FontWeight.Black)
+            }
+        } else {
+            Button(
+                onClick = { confirmStart = true },
+                enabled = actuatorAvailable,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = LotusYellow, contentColor = Color.Black)
+            ) {
+                Text("AVVIA MACRO $mode", fontWeight = FontWeight.Black)
             }
         }
-
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(160.dp)
-                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF080808)),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            LazyColumn(
-                state = terminalListState,
-                modifier = Modifier.fillMaxSize().padding(10.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                items(state.terminalLog, key = { it.id }) { entry ->
-                    TerminalLine(entry)
-                }
-            }
-        }
+        Spacer(Modifier.height(8.dp))
     }
 }
 
 @Composable
-fun EmergencyActiveBanner(
-    activeOperation: String,
-    timeRemainingSec: Int,
-    executionState: com.lotus.abs.ui.viewmodel.BleedExecState = com.lotus.abs.ui.viewmodel.BleedExecState.IDLE,
-    onEmergencyStop: () -> Unit
-) {
+private fun BleedOutcome(state: BleedState) {
+    val (headline, detail, warning) = when (state.executionState) {
+        BleedExecState.COMPLETED -> Triple("Sequenza terminata", "Comandi confermati. Verificare comunque il corretto spurgo e il pedale prima di utilizzare il veicolo.", false)
+        BleedExecState.COMPLETED_UNVERIFIED -> Triple("Sequenza terminata — risposte incomplete", "Uno o più comandi risultano solo trasmessi: lo stato fisico non è verificato.", true)
+        BleedExecState.STOPPED_CONFIRMED -> Triple("Arresto comandato e confermato", "Lo spegnimento è stato confermato dalla ECU; lo stato fisico richiede verifica.", false)
+        BleedExecState.STOP_UNCONFIRMED -> Triple("ATTENZIONE: arresto non confermato", "Non è stata ricevuta conferma completa dei comandi OFF. Verificare l'impianto prima di procedere.", true)
+        BleedExecState.ERROR -> Triple("Errore o connessione persa", "Stato attuatori non verificato. Interrompere i test e controllare il sistema.", true)
+        else -> return
+    }
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 12.dp),
-        shape = RoundedCornerShape(12.dp)
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            .border(1.dp, if (warning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary, RoundedCornerShape(10.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Row(
-            modifier = Modifier
-                .padding(12.dp)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    when (executionState) {
-                        com.lotus.abs.ui.viewmodel.BleedExecState.STOPPING -> "ARRESTO EMERGENZA IN CORSO..."
-                        com.lotus.abs.ui.viewmodel.BleedExecState.STOP_UNCONFIRMED -> "⚠️ ARRESTO NON CONFERMATO DA ECU"
-                        com.lotus.abs.ui.viewmodel.BleedExecState.ERROR -> "⚠️ ERRORE TRASPORTO / SCOLLEGATO"
-                        else -> "OPERAZIONE IN CORSO"
-                    },
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    activeOperation,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    fontSize = 15.sp
-                )
-                if (timeRemainingSec > 0) {
-                    Text(
-                        "Tempo rimanente: ${timeRemainingSec}s",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
-                    )
-                }
-            }
-
-            Button(
-                onClick = onEmergencyStop,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFDC2626),
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = "Stop d'Emergenza",
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("EMERGENCY STOP", fontSize = 11.sp, fontWeight = FontWeight.Black)
-            }
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(headline, fontWeight = FontWeight.Bold,
+                color = if (warning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary)
+            Text(detail, fontSize = 12.sp)
         }
     }
 }
