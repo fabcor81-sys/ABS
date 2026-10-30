@@ -190,4 +190,59 @@ class EmergencyStopCoordinatorTest {
         assertTrue("PUMP ON must precede ISO ON pulses", pumpOnIdx < isoOnIdx)
         assertTrue("ISO pulses must precede PUMP OFF shutdown", isoOnIdx < pumpOffIdx)
     }
+    // The pump must remain ON through the six ISO pulses, return both valves
+    // to rest, then run the experimental 5s recovery before Pump OFF.
+    @Test
+    fun test13_FastModeRecoveryFollowsValveReset() = runTest {
+        bleedViewModel.selectWheel(WheelLocation.FRONT_LEFT)
+        bleedViewModel.runWheelBleedPulseTestMacro(WheelLocation.FRONT_LEFT)
+        advanceUntilIdle()
+
+        val commands = simulatedTransport.executedCommands.map { it.first }
+        val pumpOnIndex = commands.indexOf("30020701")
+        val lastIsoPulseIndex = commands.indexOfLast { it == "30120701" }
+        val dumpOffIndex = commands.indexOfLast { it == "30110700" }
+        val isoOffIndex = commands.indexOfLast { it == "30120700" }
+        val firstPumpOffIndex = commands.indexOf("30020700")
+
+        assertTrue(pumpOnIndex >= 0)
+        assertEquals(6, commands.count { it == "30120701" })
+        assertTrue(lastIsoPulseIndex < dumpOffIndex)
+        assertTrue(dumpOffIndex < isoOffIndex)
+        assertTrue(isoOffIndex < firstPumpOffIndex)
+        assertEquals(2, commands.count { it == "30020700" })
+    }
+
+    @Test
+    fun test14_SlowModeRecoveryFollowsValveReset() = runTest {
+        bleedViewModel.selectWheel(WheelLocation.REAR_RIGHT)
+        bleedViewModel.runWheelBleedPulseTestMacroSlow(WheelLocation.REAR_RIGHT)
+        advanceUntilIdle()
+
+        val commands = simulatedTransport.executedCommands.map { it.first }
+        assertEquals(6, commands.count { it == "30420701" })
+        assertTrue(commands.indexOfLast { it == "30410700" } < commands.indexOf("30020700"))
+        assertTrue(commands.indexOfLast { it == "30420700" } < commands.indexOf("30020700"))
+    }
+
+    @Test
+    fun test15_FastModePumpRecoveryRunsForFiveSeconds() = runTest {
+        bleedViewModel.selectWheel(WheelLocation.FRONT_LEFT)
+        bleedViewModel.runWheelBleedPulseTestMacro(WheelLocation.FRONT_LEFT)
+
+        // FAST init: 2.7s; hydraulic steps: 1.0s, 1.5s, 3.6s,
+        // then 300ms after each valve OFF = 9.4s before recovery.
+        advanceTimeBy(9400)
+        testDispatcher.scheduler.runCurrent()
+        assertEquals(5, bleedViewModel.state.value.timeRemainingSec)
+        assertEquals(0, simulatedTransport.executedCommands.count { it.first == "30020700" })
+
+        advanceTimeBy(4999)
+        testDispatcher.scheduler.runCurrent()
+        assertEquals(0, simulatedTransport.executedCommands.count { it.first == "30020700" })
+
+        advanceUntilIdle()
+        assertEquals(2, simulatedTransport.executedCommands.count { it.first == "30020700" })
+    }
+
 }
