@@ -181,6 +181,21 @@ class BleedViewModel(
         _state.update { it.copy(slowMode = slow) }
     }
 
+    // Dismiss an unverified result only after the operator has inspected
+    // the hardware and consciously accepted the need for further checking.
+    fun acknowledgeOutcome() {
+        if (_state.value.isRunningSequence) return
+        if (_state.value.executionState !in setOf(
+                BleedExecState.ERROR,
+                BleedExecState.STOP_UNCONFIRMED,
+                BleedExecState.COMPLETED_UNVERIFIED
+            )) return
+        addSystemLog("Operator acknowledged unverified ABS result; physical safety is NOT verified by the app.")
+        _state.update {
+            it.copy(executionState = BleedExecState.IDLE, macroPhase = "In attesa di verifica")
+        }
+    }
+
     private fun updateMacroPhase(phase: String, cycle: Int = 0) {
         _state.update { it.copy(macroPhase = phase, pulseCycle = cycle) }
     }
