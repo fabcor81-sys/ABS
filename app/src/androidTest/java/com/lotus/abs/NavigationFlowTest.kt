@@ -54,4 +54,26 @@ class NavigationFlowTest {
         rule.onNodeWithContentDescription("Torna alla Home").performClick()
         rule.onNodeWithText("SPURGO ABS").assertIsDisplayed()
     }
+    @Test
+    fun homeConnectionAndDiagnosticsReturnToHome() {
+        rule.onNodeWithText("CONNESSIONE").performClick()
+        rule.onNodeWithText("Seleziona il collegamento").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Torna alla Home").performClick()
+        rule.onNodeWithText("ERRORI DTC").performClick()
+        rule.onNodeWithText("Diagnostica ABS / DTC").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Torna alla Home").performClick()
+        rule.onNodeWithText("SPURGO ABS").assertIsDisplayed()
+    }
+
+    @Test
+    fun setupAllowsSlowSelectionForOneWheel() {
+        rule.onNodeWithText("SPURGO ABS").performClick()
+        rule.onNodeWithText("SLOW").performScrollTo().performClick()
+        rule.onNodeWithText("LR").performScrollTo().performClick()
+        rule.onNodeWithText("CONTINUA E VERIFICA").performScrollTo().performClick()
+        rule.onNodeWithText("Spurgo LR • SLOW").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Torna alla selezione").performClick()
+        rule.onNodeWithText("Spurgo ABS assistito").assertIsDisplayed()
+    }
+
 }
