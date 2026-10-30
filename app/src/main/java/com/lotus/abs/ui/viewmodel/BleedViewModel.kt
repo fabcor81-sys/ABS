@@ -642,63 +642,86 @@ class BleedViewModel(
         runWheelBleedPulseTestMacroSlow(wheel)
     }
 
+    /**
+     * Timed diagnostic actuator test. Unlike unsupervised manual ON commands,
+     * this enforces a finite duration and verifies OFF acknowledgement.
+     * Any unconfirmed command triggers the immediate coordinated stop path.
+     */
     fun runBleedSequence(name: String, onCommand: String, offCommand: String, durationSec: Int) {
+        if (durationSec !in 1..15) {
+            addSystemLog("Manual test duration out of range (1..15 seconds).")
+            return
+        }
         if (!activeTransport.canExecute(CommandCategory.ACTUATOR_CONTROL)) {
-            addSystemLog("USB is read-only on real hardware: actuator commands are disabled.")
+            addSystemLog("Actuator control disabled or adapter disconnected.")
             return
         }
         if (_state.value.isRunningSequence || checkStopRequested()) return
+        val wheel = _state.value.selectedWheel
 
         activeJob = viewModelScope.launch {
-            var completedNormally = false
+            var stoppedAndConfirmed = false
             try {
                 _state.update {
                     it.copy(
                         activeOperation = name,
+                        macroPhase = "Test manuale temporizzato",
+                        pulseCycle = 0,
                         timeRemainingSec = durationSec,
                         isRunningSequence = true,
                         executionState = BleedExecState.RUNNING
                     )
                 }
-                addSystemLog("Starting $name sequence...")
-
+                addSystemLog("Starting timed manual test: $name (${durationSec}s).")
                 addSentLog(onCommand)
-                activeTransport.executeCommand(onCommand, CommandCategory.ACTUATOR_CONTROL)
+                val onResult = activeTransport.executeCommand(onCommand, CommandCategory.ACTUATOR_CONTROL)
+                if (!onResult.isSuccess) {
+                    addSystemLog("Manual ON not acknowledged: ${onResult.status}. Triggering stop.")
+                    return@launch
+                }
 
-                for (i in durationSec downTo 1) {
-                    if (checkStopRequested()) return@launch
-                    _state.update { it.copy(timeRemainingSec = i) }
+                for (secondsLeft in durationSec downTo 1) {
+                    if (checkStopRequested() || !activeTransport.isConnected) return@launch
+                    _state.update { it.copy(timeRemainingSec = secondsLeft) }
                     delay(1000)
                 }
-                completedNormally = true
+
+                addSentLog(offCommand)
+                val offResult = activeTransport.executeCommand(offCommand, CommandCategory.ACTUATOR_CONTROL)
+                if (!offResult.isSuccess) {
+                    addSystemLog("Manual OFF not acknowledged: ${offResult.status}. Triggering stop.")
+                    return@launch
+                }
+
+                addSentLog("30 02 07 00")
+                val pumpResult = activeTransport.executeCommand("30 02 07 00", CommandCategory.ACTUATOR_CONTROL)
+                if (!pumpResult.isSuccess) {
+                    addSystemLog("Pump OFF not acknowledged: ${pumpResult.status}. Triggering stop.")
+                    return@launch
+                }
+
+                addSentLog("30 03 07 00")
+                val relayResult = activeTransport.executeCommand("30 03 07 00", CommandCategory.ACTUATOR_CONTROL)
+                if (!relayResult.isSuccess) {
+                    addSystemLog("Relay OFF not acknowledged: ${relayResult.status}. Triggering stop.")
+                    return@launch
+                }
+
+                stoppedAndConfirmed = true
+                _state.update {
+                    it.copy(
+                        activeOperation = null, timeRemainingSec = 0,
+                        isRunningSequence = false,
+                        executionState = BleedExecState.COMPLETED,
+                        macroPhase = "Test manuale terminato"
+                    )
+                }
+                addSystemLog("Manual test OFF commands acknowledged.")
             } catch (e: CancellationException) {
-                addSystemLog("$name sequence cancelled.")
+                addSystemLog("Timed manual test interrupted.")
                 throw e
             } finally {
-                if (!completedNormally) {
-                    executeCoordinatedStop(_state.value.selectedWheel)
-                } else {
-                    withContext(NonCancellable) {
-                        addSystemLog("Stopping $name components...")
-                        addSentLog(offCommand)
-                        activeTransport.executeCommand(offCommand, CommandCategory.ACTUATOR_CONTROL)
-                        delay(200)
-                        addSentLog("30 02 07 00")
-                        activeTransport.executeCommand("30 02 07 00", CommandCategory.ACTUATOR_CONTROL)
-                        delay(200)
-                        addSentLog("30 03 07 00")
-                        activeTransport.executeCommand("30 03 07 00", CommandCategory.ACTUATOR_CONTROL)
-                        addSystemLog("Finished $name sequence.")
-                        _state.update {
-                            it.copy(
-                                activeOperation = null,
-                                timeRemainingSec = 0,
-                                isRunningSequence = false,
-                                executionState = BleedExecState.IDLE
-                            )
-                        }
-                    }
-                }
+                if (!stoppedAndConfirmed) executeCoordinatedStop(wheel)
             }
         }
     }
