@@ -277,7 +277,8 @@ fun MainApp(
                 composable("bleed") {
                     BleedScreen(
                         viewModel = bleedViewModel,
-                        onOpenConnection = { navigateTo("connection") }
+                        onOpenConnection = { navigateTo("connection") },
+                        isAdapterInitializing = connectionState.isInitializing
                     )
                 }
             }
