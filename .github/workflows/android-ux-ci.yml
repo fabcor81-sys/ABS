@@ -17,7 +17,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      - name: Android SDK on hosted runner
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
       - run: chmod +x ./gradlew
       - name: Compile APK and instrumentation test sources; run unit tests
         run: ./gradlew :app:assembleDebug :app:compileDebugAndroidTestKotlin :app:testDebugUnitTest --stacktrace
