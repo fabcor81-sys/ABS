@@ -73,9 +73,9 @@ fun LiveDataScreen(viewModel: LiveDataViewModel) {
 
         Text(
             text = when {
-                !state.isConnected -> "Adattatore scollegato — dati non aggiornati"
-                state.isPolling -> "Acquisizione attiva • ultimo dato alle ${state.lastUpdated}"
-                else -> "Acquisizione ferma • ultima lettura: ${state.lastUpdated}"
+                !state.isConnected -> "Adapter disconnected — readings may be outdated"
+                state.isPolling -> "Live polling • last update: ${state.lastUpdated}"
+                else -> "Polling stopped • last update: ${state.lastUpdated}"
             },
             fontSize = 12.sp,
             color = if (state.isPolling) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
