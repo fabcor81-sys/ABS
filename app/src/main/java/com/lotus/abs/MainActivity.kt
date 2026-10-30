@@ -271,7 +271,7 @@ fun MainApp(
                             "USB KKL 409.1" else "Bluetooth ELM327"
                     )
                 }
-                composable("connection") { ConnectionScreen(connectionViewModel) }
+                composable("connection") { ConnectionScreen(connectionViewModel, onBleed = { navigateTo("bleed") }) }
                 composable("live_data") { LiveDataScreen(liveDataViewModel) }
                 composable("dtc") { DiagnosticsScreen(diagnosticsViewModel) }
                 composable("bleed") {
