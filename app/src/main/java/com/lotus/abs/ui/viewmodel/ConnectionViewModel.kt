@@ -50,8 +50,8 @@ class ConnectionViewModel(
                         _state.emit(
                             _state.value.copy(
                                 ecuInfo = if (bluetoothManager.activeTransport == BluetoothManager.Transport.USB)
-                                    "Connected to KKL 409.1 / EBC430"
-                                else "Connected to ELM327",
+                                    "USB KKL 409.1: sessione collegata (identificazione ECU non verificata)"
+                                else "ELM327 collegato (identificazione ECU non verificata)",
                                 isInitializing = false
                             )
                         )
@@ -98,6 +98,9 @@ class ConnectionViewModel(
     
     fun refreshDeviceList() {
         loadPairedDevices()
+        if (_state.value.selectedTransport == TransportType.BLUETOOTH) {
+            bluetoothManager.startScan()
+        }
     }
 
     fun startScan() {
@@ -115,21 +118,21 @@ class ConnectionViewModel(
     }
     
     fun setTransport(transport: TransportType) {
-        _state.value = _state.value.copy(selectedTransport = transport)
+        _state.value = _state.value.copy(selectedTransport = transport, selectedDevice = null, selectedUsbDevice = null)
         refreshDeviceList()
     }
 
     fun connect(device: BluetoothDevice) {
         viewModelScope.launch {
             bluetoothManager.stopScan()
-            _state.emit(_state.value.copy(selectedDevice = device, isInitializing = true))
+            _state.emit(_state.value.copy(selectedDevice = device, selectedUsbDevice = null, isInitializing = true))
             bluetoothManager.connectToDevice(device)
         }
     }
     
     fun connectUsb(device: UsbDeviceItem) {
         viewModelScope.launch {
-            _state.emit(_state.value.copy(selectedUsbDevice = device, isInitializing = true))
+            _state.emit(_state.value.copy(selectedUsbDevice = device, selectedDevice = null, isInitializing = true))
             bluetoothManager.connectUsbDevice(device)
         }
     }
@@ -140,6 +143,7 @@ class ConnectionViewModel(
             _state.emit(
                 _state.value.copy(
                     selectedDevice = null,
+                    selectedUsbDevice = null,
                     ecuInfo = "Not Connected",
                     batteryVoltage = 0f
                 )
