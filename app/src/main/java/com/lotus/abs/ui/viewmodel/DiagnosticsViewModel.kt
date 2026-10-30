@@ -137,7 +137,7 @@ class DiagnosticsViewModel(
     fun sendCommand(command: String) {
         val normalized = command.replace(" ", "").uppercase(Locale.US)
         if (!listOf("18", "19", "1A", "21", "22").any { normalized.startsWith(it) }) {
-            val message = "Comando non consentito nel terminale di sola lettura."
+            val message = "Command not allowed in the read-only terminal."
             addErrorLog(message)
             _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
             return
@@ -145,7 +145,7 @@ class DiagnosticsViewModel(
         if (_state.value.isSending) return
         viewModelScope.launch {
             if (_state.value.connectionState != BluetoothManager.ConnectionState.CONNECTED) {
-                val message = "Dispositivo scollegato: collega prima l'adattatore."
+                val message = "Device disconnected: connect the adapter first."
                 addErrorLog(message)
                 _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
                 return@launch
@@ -157,14 +157,14 @@ class DiagnosticsViewModel(
                 val result = bluetoothManager.executeCommand(command, CommandCategory.READ_ONLY)
                 val success = result.status == CommandStatus.ACKNOWLEDGED && result.isSuccess
                 val message = if (success) {
-                    "Comando diagnostico confermato dalla ECU."
+                    "Diagnostic command acknowledged by the ECU."
                 } else {
-                    "Risposta non confermata: ${result.status} (${result.statusText})."
+                    "Response not confirmed: ${result.status} (${result.statusText})."
                 }
                 _state.update { it.copy(lastActionMessage = message, lastActionSuccess = success) }
                 if (!success) addErrorLog(message) else addSystemLog(message)
             } catch (e: Exception) {
-                val message = "Invio fallito: ${e.message}"
+                val message = "Command failed: ${e.message}"
                 addErrorLog(message)
                 _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
             } finally {
@@ -175,14 +175,14 @@ class DiagnosticsViewModel(
 
     fun clearTerminal() {
         _state.update { it.copy(terminalLog = emptyList()) }
-        addSystemLog("Terminale ripulito.")
+        addSystemLog("Terminal log cleared.")
     }
 
     fun clearAllDTCs() {
         if (_state.value.isSending) return
         viewModelScope.launch {
             if (_state.value.connectionState != BluetoothManager.ConnectionState.CONNECTED || !_state.value.canClearDtc) {
-                val message = "Cancellazione DTC non disponibile: manca connessione oppure il trasporto USB è in sola lettura."
+                val message = "DTC clearing unavailable: no connection or the USB transport is read-only."
                 addErrorLog(message)
                 _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
                 return@launch
@@ -194,15 +194,15 @@ class DiagnosticsViewModel(
                 val confirmed = result.status == CommandStatus.ACKNOWLEDGED && result.isSuccess
                 if (confirmed) {
                     dtcDao.clearAll()
-                    addSystemLog("Cancellazione DTC confermata dalla ECU. Cronologia locale pulita.")
-                    _state.update { it.copy(lastActionMessage = "Cancellazione DTC confermata dalla ECU.", lastActionSuccess = true) }
+                    addSystemLog("DTC clearing acknowledged by the ECU. Local DTC history cleared.")
+                    _state.update { it.copy(lastActionMessage = "DTC clearing acknowledged by the ECU.", lastActionSuccess = true) }
                 } else {
-                    val message = "DTC NON cancellati: ECU non ha confermato (${result.status}). Cronologia preservata."
+                    val message = "DTCs NOT cleared: ECU acknowledgement missing (${result.status}). Local history preserved."
                     addErrorLog(message)
                     _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
                 }
             } catch (e: Exception) {
-                val message = "Errore cancellazione DTC: ${e.message}. Cronologia preservata."
+                val message = "DTC clearing error: ${e.message}. Local history preserved."
                 addErrorLog(message)
                 _state.update { it.copy(lastActionMessage = message, lastActionSuccess = false) }
             } finally {
@@ -253,11 +253,11 @@ class DiagnosticsViewModel(
                         val dtcRecord = DTCRecord(
                             code = normalizedCode,
                             description = decodeDTC(normalizedCode),
-                            status = "Attivo"
+                            status = "Active"
                         )
                         dtcDao.insert(dtcRecord)
                     }
-                    addSystemLog("Rilevati e decodificati ${dtcCodes.size} codice/i di errore Lotus ABS.")
+                    addSystemLog("Detected and decoded ${dtcCodes.size} Lotus ABS DTC(s).")
                 }
             } catch (e: Exception) {
                 // Ignore parse errors for non-DTC raw responses
@@ -296,49 +296,49 @@ class DiagnosticsViewModel(
         val cleanCode = code.uppercase().trim().replace(" ", "").replace("-", "")
         return when {
             cleanCode.contains("C0035") || cleanCode.contains("0035") ->
-                "Sensore Velocità Ruota Anteriore Sinistra (LF): cortocircuito, circuito aperto o assenza segnale"
+                "Front left wheel speed sensor (LF): short circuit, open circuit, or missing signal"
             cleanCode.contains("C0040") || cleanCode.contains("0040") ->
-                "Sensore Velocità Ruota Anteriore Destra (RF): cortocircuito, circuito aperto o assenza segnale"
+                "Front right wheel speed sensor (RF): short circuit, open circuit, or missing signal"
             cleanCode.contains("C0045") || cleanCode.contains("0045") ->
-                "Sensore Velocità Ruota Posteriore Sinistra (LR): cortocircuito, circuito aperto o assenza segnale"
+                "Rear left wheel speed sensor (LR): short circuit, open circuit, or missing signal"
             cleanCode.contains("C0050") || cleanCode.contains("0050") ->
-                "Sensore Velocità Ruota Posteriore Destra (RR): cortocircuito, circuito aperto o assenza segnale"
+                "Rear right wheel speed sensor (RR): short circuit, open circuit, or missing signal"
             cleanCode.contains("C0060") || cleanCode.contains("0060") ->
-                "Elettrovalvola Scarico (DUMP) Anteriore Sinistra (LF): guasto circuito elettrico"
+                "Front left outlet (DUMP) solenoid (LF): electrical circuit fault"
             cleanCode.contains("C0065") || cleanCode.contains("0065") ->
-                "Elettrovalvola Ingresso (ISO) Anteriore Sinistra (LF): guasto circuito elettrico"
+                "Front left inlet (ISO) solenoid (LF): electrical circuit fault"
             cleanCode.contains("C0070") || cleanCode.contains("0070") ->
-                "Elettrovalvola Scarico (DUMP) Anteriore Destra (RF): guasto circuito elettrico"
+                "Front right outlet (DUMP) solenoid (RF): electrical circuit fault"
             cleanCode.contains("C0075") || cleanCode.contains("0075") ->
-                "Elettrovalvola Ingresso (ISO) Anteriore Destra (RF): guasto circuito elettrico"
+                "Front right inlet (ISO) solenoid (RF): electrical circuit fault"
             cleanCode.contains("C0080") || cleanCode.contains("0080") ->
-                "Elettrovalvola Scarico (DUMP) Posteriore Sinistra (LR): guasto circuito elettrico"
+                "Rear left outlet (DUMP) solenoid (LR): electrical circuit fault"
             cleanCode.contains("C0085") || cleanCode.contains("0085") ->
-                "Elettrovalvola Ingresso (ISO) Posteriore Sinistra (LR): guasto circuito elettrico"
+                "Rear left inlet (ISO) solenoid (LR): electrical circuit fault"
             cleanCode.contains("C0090") || cleanCode.contains("0090") ->
-                "Elettrovalvola Scarico (DUMP) Posteriore Destra (RR): guasto circuito elettrico"
+                "Rear right outlet (DUMP) solenoid (RR): electrical circuit fault"
             cleanCode.contains("C0095") || cleanCode.contains("0095") ->
-                "Elettrovalvola Ingresso (ISO) Posteriore Destra (RR): guasto circuito elettrico"
+                "Rear right inlet (ISO) solenoid (RR): electrical circuit fault"
             cleanCode.contains("C0110") || cleanCode.contains("0110") ->
-                "Pompa di Ritorno ABS: pompa bloccata, circuito aperto o in cortocircuito"
+                "ABS return pump: stalled pump, open circuit, or short circuit"
             cleanCode.contains("C0121") || cleanCode.contains("0121") ->
-                "Relè Principale Elettrovalvole ABS: guasto circuito di comando"
+                "ABS solenoid main relay: control circuit fault"
             cleanCode.contains("C0161") || cleanCode.contains("0161") ->
-                "Interruttore Luci Freno (Pedale Stop): guasto circuito o segnale incongruente"
+                "Brake light switch: circuit fault or implausible signal"
             cleanCode.contains("C0232") || cleanCode.contains("0232") ->
-                "Spia Impianto Frenante / Spia ABS: tensione anomala o circuito aperto"
+                "Brake warning lamp / ABS lamp: abnormal voltage or open circuit"
             cleanCode.contains("C0245") || cleanCode.contains("0245") ->
-                "Segnale Velocità Ruota Irregolare: errore di frequenza o dente mancante"
+                "Erratic wheel speed signal: frequency error or missing tooth"
             cleanCode.contains("C0550") || cleanCode.contains("0550") ->
-                "Centralina Elettronica ECU ABS: errore interno memoria o guasto hardware"
+                "ABS ECU: internal memory error or hardware failure"
             cleanCode.contains("C0800") || cleanCode.contains("0800") ->
-                "Tensione Alimentazione Centralina ABS: tensione alta o bassa (fuori tolleranza)"
-            cleanCode.contains("P0100") -> "Debimetro / Misuratore Flusso Aria (MAF): anomalia circuito"
-            cleanCode.contains("P0110") -> "Sensore Temperatura Aria Aspirata (IAT): anomalia circuito"
-            cleanCode.contains("P0120") -> "Sensore Posizione Farfalla (TPS): anomalia circuito"
-            cleanCode.contains("P0300") -> "Mancate Accensioni Cilindri Multiple / Casuali"
-            cleanCode.contains("U0121") -> "Comunicazione Persa con la Centralina ABS / Controllo Freni"
-            else -> "Codice Errore Diagnostico Lotus ABS ($code)"
+                "ABS ECU supply voltage: too high or too low (out of range)"
+            cleanCode.contains("P0100") -> "Mass air flow sensor (MAF): circuit malfunction"
+            cleanCode.contains("P0110") -> "Intake air temperature sensor (IAT): circuit malfunction"
+            cleanCode.contains("P0120") -> "Throttle position sensor (TPS): circuit malfunction"
+            cleanCode.contains("P0300") -> "Random / multiple cylinder misfires detected"
+            cleanCode.contains("U0121") -> "Lost communication with ABS / brake control module"
+            else -> "Lotus ABS diagnostic trouble code ($code)"
         }
     }
 }
