@@ -23,57 +23,57 @@ class NavigationFlowTest {
 
     @Test
     fun homeBleedWheelBackToSetupAndHome() {
-        rule.onNodeWithText("SPURGO ABS").performClick()
-        rule.onNodeWithText("Spurgo ABS assistito").assertIsDisplayed()
+        rule.onNodeWithText("ABS BLEEDING").performClick()
+        rule.onNodeWithText("Assisted ABS Bleeding").assertIsDisplayed()
         rule.onNodeWithText("LF").performScrollTo().performClick()
-        rule.onNodeWithText("CONTINUA E VERIFICA").performScrollTo().performClick()
-        rule.onNodeWithText("Spurgo LF • FAST INIT").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Torna alla selezione").performClick()
-        rule.onNodeWithText("Spurgo ABS assistito").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Torna alla Home").performClick()
-        rule.onNodeWithText("SPURGO ABS").assertIsDisplayed()
+        rule.onNodeWithText("CONTINUE TO REVIEW").performScrollTo().performClick()
+        rule.onNodeWithText("Bleeding LF • FAST INIT").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Back to wheel selection").performClick()
+        rule.onNodeWithText("Assisted ABS Bleeding").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Return to Home").performClick()
+        rule.onNodeWithText("ABS BLEEDING").assertIsDisplayed()
     }
 
     @Test
     fun androidBackFromWheelReturnsToSetupThenHome() {
-        rule.onNodeWithText("SPURGO ABS").performClick()
+        rule.onNodeWithText("ABS BLEEDING").performClick()
         rule.onNodeWithText("RF").performScrollTo().performClick()
-        rule.onNodeWithText("CONTINUA E VERIFICA").performScrollTo().performClick()
-        rule.onNodeWithText("Spurgo RF • FAST INIT").assertIsDisplayed()
+        rule.onNodeWithText("CONTINUE TO REVIEW").performScrollTo().performClick()
+        rule.onNodeWithText("Bleeding RF • FAST INIT").assertIsDisplayed()
         Espresso.pressBack()
-        rule.onNodeWithText("Spurgo ABS assistito").assertIsDisplayed()
+        rule.onNodeWithText("Assisted ABS Bleeding").assertIsDisplayed()
         Espresso.pressBack()
-        rule.onNodeWithText("SPURGO ABS").assertIsDisplayed()
+        rule.onNodeWithText("ABS BLEEDING").assertIsDisplayed()
     }
 
     @Test
     fun navigationDrawerOpensBleedSetup() {
-        rule.onNodeWithContentDescription("Apri menu").performClick()
-        rule.onNodeWithText("Spurgo ABS").performClick()
-        rule.onNodeWithText("Spurgo ABS assistito").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Torna alla Home").performClick()
-        rule.onNodeWithText("SPURGO ABS").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Open navigation menu").performClick()
+        rule.onNodeWithText("ABS Bleeding").performClick()
+        rule.onNodeWithText("Assisted ABS Bleeding").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Return to Home").performClick()
+        rule.onNodeWithText("ABS BLEEDING").assertIsDisplayed()
     }
     @Test
     fun homeConnectionAndDiagnosticsReturnToHome() {
-        rule.onNodeWithText("CONNESSIONE").performClick()
-        rule.onNodeWithText("Seleziona il collegamento").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Torna alla Home").performClick()
-        rule.onNodeWithText("ERRORI DTC").performClick()
-        rule.onNodeWithText("Diagnostica ABS / DTC").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Torna alla Home").performClick()
-        rule.onNodeWithText("SPURGO ABS").assertIsDisplayed()
+        rule.onNodeWithText("CONNECTION").performClick()
+        rule.onNodeWithText("Choose a connection").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Return to Home").performClick()
+        rule.onNodeWithText("DTC ERRORS").performClick()
+        rule.onNodeWithText("ABS / DTC Diagnostics").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Return to Home").performClick()
+        rule.onNodeWithText("ABS BLEEDING").assertIsDisplayed()
     }
 
     @Test
     fun setupAllowsSlowSelectionForOneWheel() {
-        rule.onNodeWithText("SPURGO ABS").performClick()
+        rule.onNodeWithText("ABS BLEEDING").performClick()
         rule.onNodeWithText("SLOW INIT").performScrollTo().performClick()
         rule.onNodeWithText("LR").performScrollTo().performClick()
-        rule.onNodeWithText("CONTINUA E VERIFICA").performScrollTo().performClick()
-        rule.onNodeWithText("Spurgo LR • SLOW INIT").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Torna alla selezione").performClick()
-        rule.onNodeWithText("Spurgo ABS assistito").assertIsDisplayed()
+        rule.onNodeWithText("CONTINUE TO REVIEW").performScrollTo().performClick()
+        rule.onNodeWithText("Bleeding LR • SLOW INIT").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Back to wheel selection").performClick()
+        rule.onNodeWithText("Assisted ABS Bleeding").assertIsDisplayed()
     }
 
 }
