@@ -1,43 +1,43 @@
 # Lotus ABS Android App
 
-Applicazione Android nativa per la diagnostica del sistema ABS (Anti-Lock Braking System) di veicoli Lotus tramite connessione Bluetooth a un dispositivo ELM327.
+Native Android application for diagnosing the ABS (Anti-lock Braking System) on Lotus vehicles through a Bluetooth connection to an ELM327 device.
 
-## Caratteristiche
+## Features
 
 ### 🏠 Home Screen
-- Visualizzazione dello stato di connessione Bluetooth
-- Lista dei dispositivi Bluetooth accoppiati
-- Informazioni sull'ECU connesso
-- Voltaggio della batteria
-- Gestione della connessione/disconnessione
+- Bluetooth connection status
+- List of paired Bluetooth devices
+- Connected ECU information
+- Battery voltage
+- Connect/disconnect controls
 
 ### 📊 Dashboard
-- **Monitoraggio Real-time:**
-  - RPM (giri motore)
-  - Velocità (km/h)
-  - Temperatura motore (°C)
-  - Pressione freni (bar)
-- Refresh manuale dei dati
-- Cronologia salvata nel database locale
+- **Real-time monitoring:**
+  - Engine speed (RPM)
+  - Vehicle speed (km/h)
+  - Engine temperature (°C)
+  - Brake pressure (bar)
+- Manual data refresh
+- History stored in a local database
 
 ### 🔧 Diagnostics
-- Lettura dei Trouble Codes (DTC)
-- Cancellazione degli errori
-- Decodifica automatica dei codici
-- Visualizzazione dello stato e descrizione errori
-- Eliminazione singoli codici dalla cronologia
+- Read diagnostic trouble codes (DTCs)
+- Clear faults
+- Automatic code decoding
+- Fault status and descriptions
+- Delete individual codes from the history
 
-## Architettura
+## Architecture
 
-### Stack Tecnologico
-- **Linguaggio:** Kotlin
-- **Framework UI:** Jetpack Compose
+### Technology Stack
+- **Language:** Kotlin
+- **UI framework:** Jetpack Compose
 - **Database:** Room Database
-- **Comunicazione:** Bluetooth Classic + OBD2
-- **Architettura:** MVVM + Flow
+- **Communication:** Bluetooth Classic + OBD2
+- **Architecture:** MVVM + Flow
 
-### Struttura del Progetto
-```
+### Project Structure
+```text
 app/src/main/
 ├── java/com/lotus/abs/
 │   ├── bluetooth/
@@ -71,67 +71,67 @@ app/src/main/
         └── themes.xml
 ```
 
-## Requisiti
+## Requirements
 
 - Android 8.0+ (API 26)
-- Dispositivo con Bluetooth
-- ELM327 accoppiato via Bluetooth
-- Permessi Android richiesti:
+- Bluetooth-capable device
+- ELM327 paired over Bluetooth
+- Required Android permissions:
   - BLUETOOTH_CONNECT
   - BLUETOOTH_SCAN
   - ACCESS_FINE_LOCATION
 
-## Build e Deploy
+## Build and Deployment
 
-### Build APK
+### Build the APK
 ```bash
 ./gradlew build
 ```
 
-### Build e installazione su device
+### Build and Install on a Device
 ```bash
 ./gradlew installDebug
 ```
 
-### Generare release APK
+### Generate a Release APK
 ```bash
 ./gradlew assembleRelease
 ```
 
-## Comandi OBD2 Supportati
+## Supported OBD2 Commands
 
-### Comandi ELM327
+### ELM327 Commands
 - `AT Z` - Reset
-- `AT E0` - Disabilita echo
-- `AT L0` - Disabilita line feeds
-- `AT SP 6` - Imposta protocollo KWP2000
+- `AT E0` - Disable echo
+- `AT L0` - Disable line feeds
+- `AT SP 6` - Set the protocol (the original documentation labels this as KWP2000; this protocol mapping needs verification)
 
-### Comandi Diagnostici
-- `010C` - RPM (giri motore)
-- `010D` - Velocità veicolo
-- `0105` - Temperatura coolant
-- `010A` - Pressione carburante
-- `19 02` - Leggi DTC
-- `14` - Cancella DTC
+### Diagnostic Commands
+- `010C` - Engine speed (RPM)
+- `010D` - Vehicle speed
+- `0105` - Coolant temperature
+- `010A` - Fuel pressure
+- `19 02` - Read DTCs
+- `14` - Clear DTCs
 
-## Utilizzo
+## Usage
 
-1. **Connessione:**
-   - Accendi il Bluetooth sul dispositivo
-   - Seleziona ELM327 dalla lista dei dispositivi
-   - L'app si connetterà automaticamente
+1. **Connection:**
+   - Enable Bluetooth on your device.
+   - Select the ELM327 from the device list.
+   - The app will connect automatically.
 
 2. **Dashboard:**
-   - Una volta connesso, accedi alla sezione Dashboard
-   - Premi il bottone di refresh per aggiornare i dati
-   - I valori vengono salvati automaticamente nel database
+   - Once connected, open the Dashboard section.
+   - Press the refresh button to update the readings.
+   - Values are automatically saved to the database.
 
-3. **Diagnostica:**
-   - Accedi a Diagnostics per leggere i codici errore
-   - Premi "Read DTC" per scansionare gli errori
-   - Usa "Clear Errors" per cancellare i DTC (attenzione!)
+3. **Diagnostics:**
+   - Open Diagnostics to read fault codes.
+   - Press "Read DTC" to scan for faults.
+   - Use "Clear Errors" to clear DTCs (use with care).
 
-## Permessi Richiesti
+## Required Permissions
 
 ```xml
 <uses-permission android:name="android.permission.BLUETOOTH" />
@@ -142,53 +142,53 @@ app/src/main/
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 ```
 
-## Note Tecniche
+## Technical Notes
 
-### Timeout Bluetooth
-- Timeout sessione: 3 secondi
-- Timeout reply: 2 secondi
-- Delay inter-messaggio: 25ms
+### Bluetooth Timeouts
+- Session timeout: 3 seconds
+- Reply timeout: 2 seconds
+- Inter-message delay: 25 ms
 
-### Database Room
-- Tabella `dtc_records` - Cronologia codici errore
-- Tabella `sensor_data` - Cronologia letture sensori
-- Database auto-pulito per dati antichi
+### Room Database
+- `dtc_records` table - Fault code history
+- `sensor_data` table - Sensor reading history
+- Automatic cleanup of old data
 
-### Thread di Comunicazione
+### Communication Threads
 - Bluetooth: Coroutine IO Dispatcher
 - UI: Main Dispatcher
 - Database: Coroutine IO Dispatcher
 
 ## Troubleshooting
 
-### Connessione non stabilizzata
-1. Verifica che ELM327 sia alimentato
-2. Riaccendi il Bluetooth sul dispositivo
-3. Riavvia l'app
+### Connection Cannot Be Established
+1. Check that the ELM327 is powered on.
+2. Turn Bluetooth off and back on.
+3. Restart the app.
 
-### DTC non leggibili
-1. Verifica la connessione Bluetooth
-2. Controlla che il veicolo sia acceso
-3. Riprova la scansione
+### DTCs Cannot Be Read
+1. Check the Bluetooth connection.
+2. Check that the vehicle ignition is on.
+3. Retry the scan.
 
-### Dati non aggiornano
-1. Premi il bottone di refresh manualmente
-2. Controlla la qualità della connessione Bluetooth
-3. Riavvia la connessione
+### Readings Do Not Update
+1. Press the manual refresh button.
+2. Check the Bluetooth connection quality.
+3. Disconnect and reconnect.
 
-## Sviluppo Futuro
+## Future Development
 
-- [ ] Grafici real-time dei dati
-- [ ] Esportazione dati in CSV
-- [ ] Storico completo delle sessioni
-- [ ] Supporto per più ECU
-- [ ] Widget Android
-- [ ] Sincronizzazione cloud
+- [ ] Real-time data charts
+- [ ] CSV data export
+- [ ] Complete session history
+- [ ] Support for multiple ECUs
+- [ ] Android widgets
+- [ ] Cloud synchronization
 
-## Licenza
+## License
 
-Questo progetto è per uso personale e diagnostica del sistema ABS Lotus.
+This project is intended for personal use and Lotus ABS diagnostics.
 
-## Contatti
+## Contact
 
-Sviluppato per la diagnostica di sistemi ABS Lotus via ELM327 Bluetooth.
+Developed for Lotus ABS diagnostics over ELM327 Bluetooth.
